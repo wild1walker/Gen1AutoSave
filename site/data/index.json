@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-21T08:50:35Z",
+  "generated_at": "2026-08-21T20:26:38Z",
   "count": 1,
   "categories": [
     "GAMEPLAY",
@@ -47,6 +47,7 @@
       "conflicts": [
         "recomp-autosave"
       ],
+      "thumbnail": "https://raw.githubusercontent.com/wild1walker/Gen1AutoSave/main/site/data/thumbnail.png",
       "description_url": "https://raw.githubusercontent.com/wild1walker/Gen1AutoSave/main/site/data/description.md",
       "downloadURL": "https://github.com/wild1walker/Gen1AutoSave/releases/latest/download/gen1autosave.zip",
       "update_check": "pending"

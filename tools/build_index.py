@@ -82,6 +82,7 @@ def build():
         "permissions": [],
         "dependencies": manifest.get("dependencies", []),
         "conflicts": manifest.get("conflicts", []),
+        "thumbnail": f"{raw}/site/data/thumbnail.png",
         "description_url": f"{raw}/site/data/description.md",
         # A fixed asset name every release also carries, so "latest" keeps
         # resolving to the newest one without this file being rewritten.
