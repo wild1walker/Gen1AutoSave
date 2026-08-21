@@ -26,9 +26,16 @@ local game = {
   overworld = ow,
   stack = { top = function() return ow end },
   writeSave = function() if vetoed then return false end writes = writes + 1 return true end,
+  -- reads come from syncState, writes go back to it, so the mod disarming
+  -- engine.uploadAt is visible to the test rather than lost on a temporary
   syncEngine = function()
-    return { busy = function() return syncState.busy end, phase = syncState.phase,
-             uploadAt = syncState.uploadAt }
+    return setmetatable({}, {
+      __index = function(_, k)
+        if k == "busy" then return function() return syncState.busy end end
+        return syncState[k]
+      end,
+      __newindex = function(_, k, v) syncState[k] = v end,
+    })
   end,
 }
 
@@ -140,49 +147,55 @@ run(250)
 local base = writes
 check("manual save restarts the interval", base == afterTimer + 2)
 
--- 8. closing the game saves when dirty
-emit("world.stepped")
-local ok = chains["core.quit_to_launcher"](function() return false end)
-check("quit save writes when the game is closing", writes == base + 1)
-check("quit chain returns the vanilla verdict", ok == false)
+-- 8. the save moved off the quit hook and onto picking QUIT, which is the
+-- last moment the game is still running: a write inside the quit itself can
+-- only make a revision nothing finishes sending, which is half a conflict.
+local function startMenu()
+  local items = { { label = "QUIT", onSelect = function() return "quit" end } }
+  return chains["ui.start_menu.items"](function(_, i) return i end, game, items)
+end
 
--- 9. and writes nothing when nothing changed
-chains["core.quit_to_launcher"](function() return false end)
-check("quit save skipped when clean", writes == base + 1)
-
--- 9a. stepping back to the launcher is the path that restarts the process,
--- so it writes nothing at all -- the upload it would arm dies half-sent, and
--- the far side of that is a conflict the player has to answer.  The save
--- stays dirty for a real quit to pick up.
 emit("world.stepped")
+local menu = startMenu()
+local quitRow
+for _, item in ipairs(menu) do if item.label == "QUIT" then quitRow = item end end
+check("the QUIT row is still there", quitRow ~= nil)
+check("and still does what it did", quitRow.onSelect() == "quit")
+check("picking QUIT saves first", writes == base + 1)
+
+-- nothing changed since, so picking it again writes nothing
+quitRow.onSelect()
+check("picking QUIT again with a clean save writes nothing", writes == base + 1)
+
+-- the engine's own quit hook no longer writes at all, either way out
+emit("world.stepped")
+local okQ = chains["core.quit_to_launcher"](function() return false end)
+check("closing the game writes nothing now", writes == base + 1)
+check("the quit verdict is passed through", okQ == false)
 local okL = chains["core.quit_to_launcher"](function() return true end)
-check("no save when stepping back to the launcher", writes == base + 1)
-check("the launcher verdict is passed through untouched", okL == true)
+check("stepping back to the launcher writes nothing either", writes == base + 1)
+check("the launcher verdict is passed through", okL == true)
 
--- 9b. quitting is a process restart, so an unfinished engine is a reason to
--- skip the exit save entirely -- there is no "try again in two seconds" here,
--- and writing anyway is what turns a killed upload into a false conflict.
-emit("world.stepped")
-syncState.busy = true
-local ok9b = chains["core.quit_to_launcher"](function() return false end)
-check("no quit save while a transfer is in flight", writes == base + 1)
-check("quit chain still returns the verdict while busy", ok9b == false)
-syncState.busy = false
-
-emit("world.stepped")
+-- but it does disarm an upload the exit would otherwise cut open
 syncState.uploadAt = 12.5
 chains["core.quit_to_launcher"](function() return false end)
-check("no quit save with an upload still pending", writes == base + 1)
-syncState.uploadAt = nil
+check("a scheduled upload is disarmed on the way out", syncState.uploadAt == nil)
 
+-- 9. sync still gates the quit save: a conflict or a transfer means skip it
 emit("world.stepped")
+syncState.busy = true
+startMenu()[#startMenu()].onSelect()
+check("no quit save while a transfer is in flight", writes == base + 1)
+syncState.busy = false
+
 syncState.phase = "conflict"
-chains["core.quit_to_launcher"](function() return false end)
+local m2 = startMenu()
+for _, item in ipairs(m2) do if item.label == "QUIT" then item.onSelect() end end
 check("no quit save while a conflict is unresolved", writes == base + 1)
 syncState.phase = "idle"
 
--- and once the engine is settled the exit save happens as before
-chains["core.quit_to_launcher"](function() return false end)
+local m3 = startMenu()
+for _, item in ipairs(m3) do if item.label == "QUIT" then item.onSelect() end end
 check("quit save writes once sync is settled", writes == base + 2)
 
 -- 10. a vetoed write does not spin

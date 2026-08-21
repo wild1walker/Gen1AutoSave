@@ -82,7 +82,7 @@ return function(mod)
       type = "toggle",
       label = "ON QUIT",
       default = true,
-      help = "Save when closing the game.",
+      help = "Save when you pick QUIT, before leaving.",
       visible_if = { key = "enabled", equals = true },
     },
     {
@@ -444,9 +444,55 @@ return function(mod)
   end
 
   -- Decorate after next(), the documented convention for this hook.
+  -- Picking QUIT is the last moment the game is still fully alive: the confirm
+  -- box is still to come, the engine is still pumping, and an upload started
+  -- here runs its course normally.  Writing at the other end -- inside the
+  -- engine's quit hook, whichever exit it is -- is what kept manufacturing
+  -- conflicts, because a write there can only ever be a revision nothing gets
+  -- to finish sending.
+  local function saveBeforeQuit(game)
+    if not (game and game.writeSave) then return end
+    if not (state.dirty and not state.inBattle) then return end
+    if not syncIdleForExit(game) then return end
+    local ow = game.overworld
+    -- no overworldIdle here: the start menu is on top of it by definition.
+    -- Mid-script and mid-step are still reasons to leave the file alone.
+    if not ow then return end
+    if (ow.runner and ow.runner.isRunning and ow.runner:isRunning())
+        or #(ow.scriptMoves or {}) > 0
+        or ow.teleportOut or ow.transitioning then
+      return
+    end
+    captureBackup(game)
+    state.saving = true
+    local ok, err = pcall(game.writeSave, game)
+    state.saving = false
+    if ok then
+      state.dirty = false
+      state.lastWriteAt = state.clock
+      announce()
+    else
+      mod.log:warn("quit save failed: %s", tostring(err))
+    end
+  end
+
   mod.hooks:wrap("ui.start_menu.items", function(nextFn, game, items)
     local out = nextFn(game, items)
     if type(out) ~= "table" then return out end
+    if on() and mod.options:get("onquit") then
+      for _, item in ipairs(out) do
+        local isQuit = item.id == "quit" or item.label == "QUIT"
+        if isQuit and type(item.onSelect) == "function"
+            and not item.gen1autosaveWrapped then
+          local original = item.onSelect
+          item.gen1autosaveWrapped = true
+          item.onSelect = function(...)
+            saveBeforeQuit(game)
+            return original(...)
+          end
+        end
+      end
+    end
     if not (on() and mod.options:get("backups")) then return out end
     local row = {
       label = "BACKUPS",
@@ -725,57 +771,24 @@ return function(mod)
     drawNotify(viewport)
   end)
 
-  -- Quitting is the one moment worth bending the rules for: no floor, no
-  -- interval, just don't do it mid-battle or mid-script.
+  -- The engine's quit hook writes nothing at all now.  Both ways out of it
+  -- have the same shape: a write here can only produce a revision that
+  -- nothing survives to finish sending, and a PUT the server applies while
+  -- its reply dies with the process is exactly half of a "played at the same
+  -- time" conflict.  The save that used to live here happens when QUIT is
+  -- picked instead, while there is still a game running to finish it.
   --
-  -- The hook fires for both ways out, and only one of them is safe to write
-  -- on.  nextFn() is the engine's own predicate for "this is a step back to
-  -- the launcher", which is a process restart: the old process lives long
-  -- enough after the write for writeSave's five second upload debounce to
-  -- start a PUT, and then dies mid-request.  The server applies it, the reply
-  -- dies with the process, and the device keeps the old revision -- one half
-  -- of a conflict, with the write itself supplying the other.  That is the
-  -- path that produced "these saves were played at the same time" over a save
-  -- only ever touched on one device.
-  --
-  -- Closing the game outright has no such window: LOVE tears the network down
-  -- (main.lua shuts down src.net.Fetch) and nothing is left in flight.  So the
-  -- save happens there and nowhere else, and the upload waits for the next
-  -- launch, which is what the sync engine is built to reconcile.
+  -- What is left is the other half: disarm an upload that has been scheduled
+  -- but not started, so the exit cannot cut one open. Nothing is lost by
+  -- waiting -- the next launch sees an ordinary local change and uploads it.
   mod.hooks:wrap("core.quit_to_launcher", function(nextFn)
     local game = state.game
-    -- pure predicate, no side effects: it only reads what kind of exit this is
-    local toLauncher = nextFn()
-    if toLauncher ~= true and on() and mod.options:get("onquit") and state.dirty
-        and game and not state.inBattle and game.writeSave
-        and syncIdleForExit(game) then
-      local ow = game.overworld
-      local busy = not ow
-        or (ow.runner and ow.runner.isRunning and ow.runner:isRunning())
-        or #(ow.scriptMoves or {}) > 0
-        or ow.teleportOut or ow.transitioning
-      if not busy then
-        captureBackup(game)
-        state.saving = true
-        local ok, err = pcall(game.writeSave, game)
-        state.saving = false
-        if ok then
-          state.dirty = false
-          -- Belt and braces for the race above: writeSave has just armed the
-          -- upload debounce, and nothing that follows a quit is going to run
-          -- it to completion.  Disarming it means the write reaches the
-          -- server on the next launch as an ordinary local change, instead of
-          -- as a transfer something has to survive.
-          pcall(function()
-            local engine = game:syncEngine()
-            if type(engine) == "table" then engine.uploadAt = nil end
-          end)
-        else
-          mod.log:warn("quit save failed: %s", tostring(err))
-        end
-      end
+    if game then
+      pcall(function()
+        local engine = game:syncEngine()
+        if type(engine) == "table" then engine.uploadAt = nil end
+      end)
     end
-    -- already evaluated above; the engine's predicate is not worth asking twice
-    return toLauncher
+    return nextFn()
   end)
 end

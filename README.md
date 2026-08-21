@@ -31,11 +31,11 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
   on a route. The write itself still waits for a settled overworld.
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map.
-- **Saves when you close the game**, unless you are mid-battle, mid-script, or
-  save sync still has something in flight. Stepping back to the launcher does
-  not save: that path restarts the process, and a write there arms an upload
-  the restart then kills half-sent, which is what a "played at the same time"
-  conflict is made of.
+- **Saves when you pick QUIT**, before the confirm box — the last moment the
+  game is still running, so the upload it starts gets to finish. The engine's
+  own quit writes nothing at all: by then a write can only make a revision
+  that never finishes sending, which is half of a "played at the same time"
+  conflict.
 - **A Poke Ball that wobbles** in the top right corner when a save lands, in
   place of a text box across the screen. Switchable to a small `SAVED` panel,
   the classic text box, or off.
@@ -55,7 +55,7 @@ does not land on top of a save you just made yourself.
 | `AUTO SAVE` | on | Master switch. |
 | `INTERVAL` | 5 MIN | Play time between saves. `OFF` leaves only the event and quit saves. |
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
-| `ON QUIT` | on | Save when closing the game. Not when stepping back to the launcher. |
+| `ON QUIT` | on | Save when you pick QUIT, before leaving. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
@@ -86,14 +86,14 @@ directly. The work is in *not* writing at the wrong moments.
   of any kind — measured the other way, a battle that ended just after a timer
   save produced nothing for a minute, which reads as never saving after
   battles at all.
-- **Nothing is written on the way back to the launcher.** That path is a
-  process restart, and the old process lives just long enough after a write
-  for the five second upload debounce to start a PUT and then die mid-request.
-  The server applies it, the reply dies with the process, and the device keeps
-  the old revision — one half of a conflict, with the write itself supplying
-  the other. Closing the game has no such window: LÖVE tears the network down
-  and nothing is left in flight, so that is where the quit save happens, and
-  the upload waits for the next launch.
+- **Nothing is written inside the quit itself**, either way out of it. A write
+  there can only make a revision nothing survives to finish sending: the
+  server applies the PUT, the reply dies with the process, and the device
+  keeps the old revision — one half of a conflict, with the write supplying
+  the other. So the quit save happens when you pick QUIT instead, while there
+  is still a game running to carry the upload through. All the quit hook does
+  now is disarm an upload that was scheduled but not started, so the exit
+  cannot cut one open; the next launch uploads it as an ordinary change.
 
 ## Backups
 

@@ -10,11 +10,11 @@ deliberately careful around the built-in save sync.
   on a route. The write itself still waits for a settled overworld.
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map.
-- **Saves when you close the game**, unless you are mid-battle, mid-script, or
-  save sync still has something in flight. Stepping back to the launcher does
-  not save: that path restarts the process, and a write there arms an upload
-  the restart then kills half-sent, which is what a "played at the same time"
-  conflict is made of.
+- **Saves when you pick QUIT**, before the confirm box — the last moment the
+  game is still running, so the upload it starts gets to finish. The engine's
+  own quit writes nothing at all: by then a write can only make a revision
+  that never finishes sending, which is half of a "played at the same time"
+  conflict.
 - **A Poke Ball that wobbles** in the top right corner when a save lands, in
   place of a text box across the screen. Switchable to a small `SAVED` panel,
   the classic text box, or off.
@@ -32,7 +32,7 @@ does not land on top of a save you just made yourself.
 | `AUTO SAVE` | on | Master switch. |
 | `INTERVAL` | 5 MIN | Play time between saves. `OFF` leaves only the event and quit saves. |
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
-| `ON QUIT` | on | Save when closing the game. Not when stepping back to the launcher. |
+| `ON QUIT` | on | Save when you pick QUIT, before leaving. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
