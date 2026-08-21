@@ -17,7 +17,7 @@
 
 return function(mod)
   local MIN_GAP = 20        -- seconds between any two autosaves
-  local EVENT_GAP = 60      -- longer floor for event-triggered saves
+  local EVENT_GAP = 60      -- and between two event-triggered ones
   local SYNC_RETRY = 2.0    -- re-check a busy sync this often
   local NOTIFY_TIME = 1.6
 
@@ -33,6 +33,7 @@ return function(mod)
     clock = 0,
     elapsed = 0,
     lastWriteAt = -math.huge,
+    lastEventAt = -math.huge,
     dirty = false,
     due = false,
     reason = nil,
@@ -79,9 +80,9 @@ return function(mod)
     {
       key = "onquit",
       type = "toggle",
-      label = "ON EXIT",
+      label = "ON QUIT",
       default = true,
-      help = "Save when leaving to the launcher.",
+      help = "Save when closing the game.",
       visible_if = { key = "enabled", equals = true },
     },
     {
@@ -198,11 +199,6 @@ return function(mod)
     return idle
   end
 
-  local function gapFor(reason)
-    if reason == "event" then return EVENT_GAP end
-    return MIN_GAP
-  end
-
   -- ---------- the write
 
   local function announce(held)
@@ -240,6 +236,7 @@ return function(mod)
     state.saving = false
 
     if ok and result ~= false then
+      if state.reason == "event" then state.lastEventAt = state.clock end
       state.elapsed = 0
       state.dirty = false
       state.due = false
@@ -699,7 +696,19 @@ return function(mod)
       state.elapsed = 0
       return
     end
-    if state.clock - state.lastWriteAt < gapFor(state.reason) then return end
+    -- Two floors, because they answer different questions.  MIN_GAP is about
+    -- the file: no two writes closer than this, whatever asked for them.
+    -- EVENT_GAP is about bursts of events -- a row of door transitions -- and
+    -- so it counts from the last event save, not from the last save of any
+    -- kind.  Measuring it from the latter is what made a battle that ended
+    -- just after a timer save produce nothing for a minute: the save was
+    -- real, it simply landed later and somewhere else, which reads exactly
+    -- like "it doesn't save after battles".
+    if state.clock - state.lastWriteAt < MIN_GAP then return end
+    if state.reason == "event"
+        and state.clock - state.lastEventAt < EVENT_GAP then
+      return
+    end
     if not overworldIdle(game) then return end
     local settled, why = syncSettled(game)
     if not settled then
@@ -716,19 +725,30 @@ return function(mod)
     drawNotify(viewport)
   end)
 
-  -- Leaving to the launcher is the one moment worth bending the rules for:
-  -- no floor, no interval, just don't do it mid-battle or mid-script.
+  -- Quitting is the one moment worth bending the rules for: no floor, no
+  -- interval, just don't do it mid-battle or mid-script.
   --
-  -- Sync is the one rule that does not bend, and it bends less here than
-  -- anywhere else: every other write can wait for a busy engine and try again
-  -- a couple of seconds later, but this one has no later to wait for.  So it
-  -- skips instead.  Losing the minutes since the last autosave is the cheaper
-  -- half of that trade -- the other half is a false "these saves were played
-  -- at the same time" the player has to answer by hand.
+  -- The hook fires for both ways out, and only one of them is safe to write
+  -- on.  nextFn() is the engine's own predicate for "this is a step back to
+  -- the launcher", which is a process restart: the old process lives long
+  -- enough after the write for writeSave's five second upload debounce to
+  -- start a PUT, and then dies mid-request.  The server applies it, the reply
+  -- dies with the process, and the device keeps the old revision -- one half
+  -- of a conflict, with the write itself supplying the other.  That is the
+  -- path that produced "these saves were played at the same time" over a save
+  -- only ever touched on one device.
+  --
+  -- Closing the game outright has no such window: LOVE tears the network down
+  -- (main.lua shuts down src.net.Fetch) and nothing is left in flight.  So the
+  -- save happens there and nowhere else, and the upload waits for the next
+  -- launch, which is what the sync engine is built to reconcile.
   mod.hooks:wrap("core.quit_to_launcher", function(nextFn)
     local game = state.game
-    if on() and mod.options:get("onquit") and state.dirty and game
-        and not state.inBattle and game.writeSave and syncIdleForExit(game) then
+    -- pure predicate, no side effects: it only reads what kind of exit this is
+    local toLauncher = nextFn()
+    if toLauncher ~= true and on() and mod.options:get("onquit") and state.dirty
+        and game and not state.inBattle and game.writeSave
+        and syncIdleForExit(game) then
       local ow = game.overworld
       local busy = not ow
         or (ow.runner and ow.runner.isRunning and ow.runner:isRunning())
@@ -741,11 +761,21 @@ return function(mod)
         state.saving = false
         if ok then
           state.dirty = false
+          -- Belt and braces for the race above: writeSave has just armed the
+          -- upload debounce, and nothing that follows a quit is going to run
+          -- it to completion.  Disarming it means the write reaches the
+          -- server on the next launch as an ordinary local change, instead of
+          -- as a transfer something has to survive.
+          pcall(function()
+            local engine = game:syncEngine()
+            if type(engine) == "table" then engine.uploadAt = nil end
+          end)
         else
-          mod.log:warn("exit save failed: %s", tostring(err))
+          mod.log:warn("quit save failed: %s", tostring(err))
         end
       end
     end
-    return nextFn()
+    -- already evaluated above; the engine's predicate is not worth asking twice
+    return toLauncher
   end)
 end

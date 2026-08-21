@@ -61,14 +61,15 @@ check("timer fires after the interval", writes == 1)
 run(400)
 check("no second write without new activity", writes == 1)
 
--- 4. an event right after a write respects the 60s floor
+-- 4. an event right after a write still respects the file's own floor, but a
+-- manual save is not an event save and no longer holds one off for a minute
 emit("save.writing")
 emit("world.stepped")
 emit("pokemon.caught")
-run(30)
-check("event save waits out the floor", writes == 1)
-run(35)
-check("event save lands after the floor", writes == 2)
+run(15)
+check("event save waits out MIN_GAP", writes == 1)
+run(10)
+check("event save lands once MIN_GAP has passed", writes == 2)
 
 -- 5. no write while the overworld is busy
 emit("world.stepped")
@@ -113,58 +114,86 @@ syncState.busy = false
 run(30)
 check("and the write lands when it finishes", writes == 6)
 
+-- 6c. an event save is floored against other EVENT saves, not against every
+-- save: a battle ending just after a timer save used to produce nothing for a
+-- whole minute, which reads as "it never saves after battles".
+run(30)                       -- clear MIN_GAP after the last write
+emit("world.stepped")
+run(400)                      -- a timer save lands
+local afterTimer = writes
+emit("battle.ended")          -- a wild battle ends right on its heels
+run(25)                       -- past MIN_GAP, nowhere near EVENT_GAP
+check("a battle just after a timer save still saves", writes == afterTimer + 1)
+
+-- but a burst of events in a row is still held to EVENT_GAP
+emit("map.entered")
+run(25)
+check("a second event within EVENT_GAP is held", writes == afterTimer + 1)
+run(40)
+check("and lands once EVENT_GAP has passed", writes == afterTimer + 2)
+
 -- 7. a manual save resets the clock
 emit("world.stepped")
 run(100)
 emit("save.writing")
 run(250)
-check("manual save restarts the interval", writes == 6)
+local base = writes
+check("manual save restarts the interval", base == afterTimer + 2)
 
--- 8. quit saves when dirty
+-- 8. closing the game saves when dirty
 emit("world.stepped")
-local ok = chains["core.quit_to_launcher"](function() return "bye" end)
-check("exit save writes", writes == 7)
-check("quit chain returns vanilla result", ok == "bye")
+local ok = chains["core.quit_to_launcher"](function() return false end)
+check("quit save writes when the game is closing", writes == base + 1)
+check("quit chain returns the vanilla verdict", ok == false)
 
--- 9. quit does not write when nothing changed
-chains["core.quit_to_launcher"](function() return "bye" end)
-check("exit save skipped when clean", writes == 7)
+-- 9. and writes nothing when nothing changed
+chains["core.quit_to_launcher"](function() return false end)
+check("quit save skipped when clean", writes == base + 1)
+
+-- 9a. stepping back to the launcher is the path that restarts the process,
+-- so it writes nothing at all -- the upload it would arm dies half-sent, and
+-- the far side of that is a conflict the player has to answer.  The save
+-- stays dirty for a real quit to pick up.
+emit("world.stepped")
+local okL = chains["core.quit_to_launcher"](function() return true end)
+check("no save when stepping back to the launcher", writes == base + 1)
+check("the launcher verdict is passed through untouched", okL == true)
 
 -- 9b. quitting is a process restart, so an unfinished engine is a reason to
 -- skip the exit save entirely -- there is no "try again in two seconds" here,
 -- and writing anyway is what turns a killed upload into a false conflict.
 emit("world.stepped")
 syncState.busy = true
-local ok9b = chains["core.quit_to_launcher"](function() return "bye" end)
-check("no exit save while a transfer is in flight", writes == 7)
-check("quit chain still returns vanilla while busy", ok9b == "bye")
+local ok9b = chains["core.quit_to_launcher"](function() return false end)
+check("no quit save while a transfer is in flight", writes == base + 1)
+check("quit chain still returns the verdict while busy", ok9b == false)
 syncState.busy = false
 
 emit("world.stepped")
 syncState.uploadAt = 12.5
-chains["core.quit_to_launcher"](function() return "bye" end)
-check("no exit save with an upload still pending", writes == 7)
+chains["core.quit_to_launcher"](function() return false end)
+check("no quit save with an upload still pending", writes == base + 1)
 syncState.uploadAt = nil
 
 emit("world.stepped")
 syncState.phase = "conflict"
-chains["core.quit_to_launcher"](function() return "bye" end)
-check("no exit save while a conflict is unresolved", writes == 7)
+chains["core.quit_to_launcher"](function() return false end)
+check("no quit save while a conflict is unresolved", writes == base + 1)
 syncState.phase = "idle"
 
 -- and once the engine is settled the exit save happens as before
-chains["core.quit_to_launcher"](function() return "bye" end)
-check("exit save writes once sync is settled", writes == 8)
+chains["core.quit_to_launcher"](function() return false end)
+check("quit save writes once sync is settled", writes == base + 2)
 
 -- 10. a vetoed write does not spin
 vetoed = true
 emit("world.stepped")
 run(400)
-check("vetoed write is not retried in a loop", writes == 8)
+check("vetoed write is not retried in a loop", writes == base + 2)
 vetoed = false
 
 -- 11. disabled does nothing
 opts.enabled = false
 emit("world.stepped")
 run(400)
-check("disabled writes nothing", writes == 8)
+check("disabled writes nothing", writes == base + 2)

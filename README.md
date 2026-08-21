@@ -31,8 +31,11 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
   on a route. The write itself still waits for a settled overworld.
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map.
-- **Saves on the way out** to the launcher, unless you are mid-battle,
-  mid-script, or save sync still has something in flight.
+- **Saves when you close the game**, unless you are mid-battle, mid-script, or
+  save sync still has something in flight. Stepping back to the launcher does
+  not save: that path restarts the process, and a write there arms an upload
+  the restart then kills half-sent, which is what a "played at the same time"
+  conflict is made of.
 - **A Poke Ball that wobbles** in the top right corner when a save lands, in
   place of a text box across the screen. Switchable to a small `SAVED` panel,
   the classic text box, or off.
@@ -50,9 +53,9 @@ does not land on top of a save you just made yourself.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `AUTO SAVE` | on | Master switch. |
-| `INTERVAL` | 5 MIN | Play time between saves. `OFF` leaves only the event and exit saves. |
+| `INTERVAL` | 5 MIN | Play time between saves. `OFF` leaves only the event and quit saves. |
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
-| `ON EXIT` | on | Save when leaving to the launcher. |
+| `ON QUIT` | on | Save when closing the game. Not when stepping back to the launcher. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
@@ -77,15 +80,20 @@ directly. The work is in *not* writing at the wrong moments.
   waiting on you, both hold the file still; the save is retried once sync
   settles. Adding a third revision to a disagreement you have not answered yet
   is how a cross-device conflict gets worse.
-- **Floors between writes.** 20 seconds minimum, 60 for event-triggered saves,
-  so a burst of door transitions cannot hammer the file.
-- **The exit save skips rather than waits.** Returning to the launcher is a
-  process restart, so an upload the engine has not finished never finishes:
-  the server can apply it while the reply dies with the process, leaving the
-  device a revision behind without knowing it. Writing on top of that is the
-  second half of a conflict — both sides changed — over a save only ever
-  touched on one device. Every other write in this mod waits two seconds and
-  retries; this one has no later to wait for, so it gives up the save instead.
+- **Floors between writes.** 20 seconds between any two writes, and 60 between
+  two *event* saves, so a row of door transitions cannot hammer the file. The
+  event floor counts from the last event save rather than from the last save
+  of any kind — measured the other way, a battle that ended just after a timer
+  save produced nothing for a minute, which reads as never saving after
+  battles at all.
+- **Nothing is written on the way back to the launcher.** That path is a
+  process restart, and the old process lives just long enough after a write
+  for the five second upload debounce to start a PUT and then die mid-request.
+  The server applies it, the reply dies with the process, and the device keeps
+  the old revision — one half of a conflict, with the write itself supplying
+  the other. Closing the game has no such window: LÖVE tears the network down
+  and nothing is left in flight, so that is where the quit save happens, and
+  the upload waits for the next launch.
 
 ## Backups
 
@@ -109,7 +117,7 @@ Requires `lua5.4`.
 
 ```sh
 lua5.4 -e "assert(loadfile('main.lua'))"   # syntax
-cd tests && lua5.4 test_autosave.lua       # timing, sync gating, exit save
+cd tests && lua5.4 test_autosave.lua       # timing, sync gating, quit save
 cd tests && lua5.4 test_backups.lua        # ring rotation, menu, rollback
 cd tests && lua5.4 test_indicator.lua      # HUD geometry across DPI scales
 ```
