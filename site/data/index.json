@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-21T07:40:03Z",
+  "count": 1,
+  "categories": [
+    "GAMEPLAY",
+    "CONTENT",
+    "BALANCE",
+    "ART",
+    "AUDIO",
+    "UI",
+    "QOL",
+    "TRANSLATION",
+    "TOTAL_CONVERSION",
+    "LIBRARY",
+    "TOOL",
+    "OTHER"
+  ],
+  "mods": [
+    {
+      "folder": "wild1walker@gen1autosave",
+      "id": "gen1autosave",
+      "title": "Gen1AutoSave",
+      "author": "Wild",
+      "version": "1.0.0",
+      "summary": "Autosaves on a play-time timer and after battles, catches and new areas, with optional rollback backups.",
+      "categories": [
+        "QOL",
+        "GAMEPLAY"
+      ],
+      "tags": [
+        "autosave",
+        "save",
+        "quality of life",
+        "backups",
+        "rollback"
+      ],
+      "repo": "https://github.com/wild1walker/Gen1AutoSave",
+      "github": "wild1walker/Gen1AutoSave",
+      "license": "MIT",
+      "api": 2,
+      "game_version": ">=0.0.0-dev <1.0.0",
+      "profile": "content",
+      "affects_link": false,
+      "permissions": [],
+      "dependencies": [],
+      "conflicts": [
+        "recomp-autosave"
+      ],
+      "description_url": "https://raw.githubusercontent.com/wild1walker/Gen1AutoSave/main/site/data/description.md",
+      "downloadURL": "https://github.com/wild1walker/Gen1AutoSave/releases/latest/download/gen1autosave.zip",
+      "update_check": "pending"
+    }
+  ]
+}

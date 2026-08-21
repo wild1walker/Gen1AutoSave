@@ -1,0 +1,9 @@
+# The release workflow packs `git archive HEAD`, so anything marked
+# export-ignore here stays out of the installable .zip.
+tests/ export-ignore
+.github/ export-ignore
+README.md export-ignore
+.gitattributes export-ignore
+docs/ export-ignore
+site/ export-ignore
+tools/ export-ignore
