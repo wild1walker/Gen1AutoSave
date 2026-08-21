@@ -31,8 +31,8 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
   on a route. The write itself still waits for a settled overworld.
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map.
-- **Saves on the way out** to the launcher, unless you are mid-battle or
-  mid-script.
+- **Saves on the way out** to the launcher, unless you are mid-battle,
+  mid-script, or save sync still has something in flight.
 - **A Poke Ball that wobbles** in the top right corner when a save lands, in
   place of a text box across the screen. Switchable to a small `SAVED` panel,
   the classic text box, or off.
@@ -74,6 +74,13 @@ directly. The work is in *not* writing at the wrong moments.
   is how a cross-device conflict gets worse.
 - **Floors between writes.** 20 seconds minimum, 60 for event-triggered saves,
   so a burst of door transitions cannot hammer the file.
+- **The exit save skips rather than waits.** Returning to the launcher is a
+  process restart, so an upload the engine has not finished never finishes:
+  the server can apply it while the reply dies with the process, leaving the
+  device a revision behind without knowing it. Writing on top of that is the
+  second half of a conflict — both sides changed — over a save only ever
+  touched on one device. Every other write in this mod waits two seconds and
+  retries; this one has no later to wait for, so it gives up the save instead.
 
 ## Backups
 

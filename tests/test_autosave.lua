@@ -21,13 +21,14 @@ local mod = {
 
 local player = { moving = false }
 local ow = { player = player, scriptMoves = {}, runner = nil }
-local syncState = { busy = false, phase = "idle" }
+local syncState = { busy = false, phase = "idle", uploadAt = nil }
 local game = {
   overworld = ow,
   stack = { top = function() return ow end },
   writeSave = function() if vetoed then return false end writes = writes + 1 return true end,
   syncEngine = function()
-    return { busy = function() return syncState.busy end, phase = syncState.phase }
+    return { busy = function() return syncState.busy end, phase = syncState.phase,
+             uploadAt = syncState.uploadAt }
   end,
 }
 
@@ -104,15 +105,41 @@ check("quit chain returns vanilla result", ok == "bye")
 chains["core.quit_to_launcher"](function() return "bye" end)
 check("exit save skipped when clean", writes == 5)
 
+-- 9b. quitting is a process restart, so an unfinished engine is a reason to
+-- skip the exit save entirely -- there is no "try again in two seconds" here,
+-- and writing anyway is what turns a killed upload into a false conflict.
+emit("world.stepped")
+syncState.busy = true
+local ok9b = chains["core.quit_to_launcher"](function() return "bye" end)
+check("no exit save while a transfer is in flight", writes == 5)
+check("quit chain still returns vanilla while busy", ok9b == "bye")
+syncState.busy = false
+
+emit("world.stepped")
+syncState.uploadAt = 12.5
+chains["core.quit_to_launcher"](function() return "bye" end)
+check("no exit save with an upload still pending", writes == 5)
+syncState.uploadAt = nil
+
+emit("world.stepped")
+syncState.phase = "conflict"
+chains["core.quit_to_launcher"](function() return "bye" end)
+check("no exit save while a conflict is unresolved", writes == 5)
+syncState.phase = "idle"
+
+-- and once the engine is settled the exit save happens as before
+chains["core.quit_to_launcher"](function() return "bye" end)
+check("exit save writes once sync is settled", writes == 6)
+
 -- 10. a vetoed write does not spin
 vetoed = true
 emit("world.stepped")
 run(400)
-check("vetoed write is not retried in a loop", writes == 5)
+check("vetoed write is not retried in a loop", writes == 6)
 vetoed = false
 
 -- 11. disabled does nothing
 opts.enabled = false
 emit("world.stepped")
 run(400)
-check("disabled writes nothing", writes == 5)
+check("disabled writes nothing", writes == 6)

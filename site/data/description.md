@@ -10,8 +10,8 @@ deliberately careful around the built-in save sync.
   on a route. The write itself still waits for a settled overworld.
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map.
-- **Saves on the way out** to the launcher, unless you are mid-battle or
-  mid-script.
+- **Saves on the way out** to the launcher, unless you are mid-battle,
+  mid-script, or save sync still has something in flight.
 - **A Poke Ball that wobbles** in the top right corner when a save lands, in
   place of a text box across the screen. Switchable to a small `SAVED` panel,
   the classic text box, or off.

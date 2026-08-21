@@ -171,6 +171,29 @@ return function(mod)
     return true
   end
 
+  -- Returning to the launcher is a process restart (HostShell.restart), so
+  -- whatever the engine has not finished by the time the hook returns never
+  -- finishes.  A PUT already in flight is the dangerous one: the server can
+  -- apply it while the reply dies with the process, leaving this device a
+  -- revision behind without knowing it -- and a local write on top of that is
+  -- the second half of a conflict the player then has to answer, about a save
+  -- only ever touched on one device.
+  --
+  -- uploadAt is the engine's own debounce field: set when a write is waiting
+  -- to go up, cleared once it has.  It is read rather than called because
+  -- there is no accessor for it, and a pending upload matters here for the
+  -- same reason an in-flight one does -- the restart is going to eat it.
+  local function syncIdleForExit(game)
+    local ok, engine = pcall(function() return game:syncEngine() end)
+    if not ok or type(engine) ~= "table" then return true end
+    local idle = true
+    pcall(function()
+      idle = not (engine:busy() == true or engine.phase == "conflict"
+        or engine.uploadAt ~= nil)
+    end)
+    return idle
+  end
+
   local function gapFor(reason)
     if reason == "event" then return EVENT_GAP end
     return MIN_GAP
@@ -663,10 +686,17 @@ return function(mod)
 
   -- Leaving to the launcher is the one moment worth bending the rules for:
   -- no floor, no interval, just don't do it mid-battle or mid-script.
+  --
+  -- Sync is the one rule that does not bend, and it bends less here than
+  -- anywhere else: every other write can wait for a busy engine and try again
+  -- a couple of seconds later, but this one has no later to wait for.  So it
+  -- skips instead.  Losing the minutes since the last autosave is the cheaper
+  -- half of that trade -- the other half is a false "these saves were played
+  -- at the same time" the player has to answer by hand.
   mod.hooks:wrap("core.quit_to_launcher", function(nextFn)
     local game = state.game
     if on() and mod.options:get("onquit") and state.dirty and game
-        and not state.inBattle and game.writeSave then
+        and not state.inBattle and game.writeSave and syncIdleForExit(game) then
       local ow = game.overworld
       local busy = not ow
         or (ow.runner and ow.runner.isRunning and ow.runner:isRunning())
