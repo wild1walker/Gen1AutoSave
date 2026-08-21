@@ -1,0 +1,20 @@
+{
+  "id": "gen1autosave",
+  "name": "Gen1AutoSave",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "affects_link": false,
+  "game_version": ">=0.0.0-dev <1.0.0",
+  "category": "GAMEPLAY",
+  "priority": 50,
+  "dependencies": [],
+  "optional_dependencies": [],
+  "conflicts": [
+    "recomp-autosave"
+  ],
+  "description": "Saves on its own so manual saving is optional: a play-time timer plus saves after battles, catches, new areas and on exit. Optional rollback backups of recent autosaves, kept in mod storage with a BACKUPS entry in the START menu. Skips writes when nothing changed and stays quiet while save sync is transferring or holding a conflict.",
+  "github": "wild1walker/Gen1AutoSave",
+  "author": "Wild"
+}

@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.4
+
+      - name: Syntax check
+        run: lua5.4 -e "assert(loadfile('main.lua'))"
+
+      - name: Mod index feed is current
+        run: python3 tools/build_index.py --check
+
+      - name: Run harnesses
+        run: |
+          set -euo pipefail
+          cd tests
+          fail=0
+          for t in test_autosave.lua test_backups.lua test_indicator.lua; do
+            echo "== $t"
+            out="$(lua5.4 "$t")"
+            echo "$out"
+            if grep -q '^FAIL' <<<"$out"; then fail=1; fi
+          done
+          exit "$fail"
