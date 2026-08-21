@@ -26,6 +26,8 @@ return function(mod)
   local ICON_MARGIN = 2     -- GB pixels from the playfield corner
   local MESSAGE_TEXT = "Game saved."
   local ICON_TEXT = "SAVED"
+  local HELD_MESSAGE = "Autosave paused."
+  local HELD_ICON = "PAUSED"
 
   local state = {
     clock = 0,
@@ -38,6 +40,7 @@ return function(mod)
     saving = false,
     syncWaitUntil = 0,
     notify = 0,
+    heldTold = false,
     game = nil,
   }
 
@@ -160,13 +163,14 @@ return function(mod)
     if state.clock < state.syncWaitUntil then return false end
     local ok, engine = pcall(function() return game:syncEngine() end)
     if not ok or type(engine) ~= "table" then return true end
-    local busy = false
+    local busy, conflict = false, false
     pcall(function()
-      busy = engine:busy() == true or engine.phase == "conflict"
+      conflict = engine.phase == "conflict"
+      busy = engine:busy() == true or conflict
     end)
     if busy then
       state.syncWaitUntil = state.clock + SYNC_RETRY
-      return false
+      return false, conflict and "conflict" or "transfer"
     end
     return true
   end
@@ -201,14 +205,29 @@ return function(mod)
 
   -- ---------- the write
 
-  local function announce()
+  local function announce(held)
     if mod.options:get("notify") ~= "off" then
       state.notify = NOTIFY_TIME
+      state.held = held == true
     end
   end
 
   local function clearNotifyText()
-    if state.notify <= 0 then state.notifyText = nil end
+    if state.notify <= 0 then
+      state.notifyText = nil
+      state.held = false
+    end
+  end
+
+  -- An unresolved sync conflict holds every write, with no timeout and no way
+  -- out but the player answering the launcher's prompt -- so staying quiet
+  -- about it reads exactly like the mod having stopped working.  Said once
+  -- per hold, not once per frame: it is a standing condition, not an event.
+  local function tellHeld(why)
+    if why ~= "conflict" or state.heldTold then return end
+    state.heldTold = true
+    announce(true)
+    mod.log:warn("autosave held: save sync is waiting on a conflict answer")
   end
 
   local function write(game)
@@ -301,6 +320,8 @@ return function(mod)
     state.reason = nil
     state.inBattle = false
     state.notify = 0
+    state.heldTold = false
+    state.held = false
     state.lastWriteAt = state.clock
   end
 
@@ -574,7 +595,8 @@ return function(mod)
     local g = love and love.graphics
     local Font = mod.ui and mod.ui.Font
     if not (g and viewport) then return end
-    if mode ~= "ball" and not Font then return end
+    -- a held notice is text even in ball mode, so the font matters there too
+    if not Font and (mode ~= "ball" or state.held) then return end
 
     local gx, gy = viewport.gameX or 0, viewport.gameY or 0
     local gw, gh = viewport.gameWidth or 0, viewport.gameHeight or 0
@@ -595,7 +617,7 @@ return function(mod)
 
     -- The ball is its own little panel: sprite-sized, top right, and it fades
     -- on the way out instead of blinking off.
-    if mode == "ball" then
+    if mode == "ball" and not state.held then
       local elapsed = NOTIFY_TIME - state.notify
       local alpha = 1
       if state.notify < FADE_TIME then alpha = state.notify / FADE_TIME end
@@ -613,7 +635,12 @@ return function(mod)
 
     local tw = boxed and BOX_W or ICON_W
     local th = boxed and BOX_H or ICON_H
-    local text = boxed and MESSAGE_TEXT or (state.notifyText or ICON_TEXT)
+    local text
+    if state.held then
+      text = boxed and HELD_MESSAGE or HELD_ICON
+    else
+      text = boxed and MESSAGE_TEXT or (state.notifyText or ICON_TEXT)
+    end
     local panelW, panelH = tw * 8, th * 8
     local textX = math.floor((panelW - #text * 8) / 2)
 
@@ -674,7 +701,12 @@ return function(mod)
     end
     if state.clock - state.lastWriteAt < gapFor(state.reason) then return end
     if not overworldIdle(game) then return end
-    if not syncSettled(game) then return end
+    local settled, why = syncSettled(game)
+    if not settled then
+      tellHeld(why)
+      return
+    end
+    state.heldTold = false
 
     write(game)
   end)

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-21T08:03:51Z",
+  "generated_at": "2026-08-21T08:18:56Z",
   "count": 1,
   "categories": [
     "GAMEPLAY",
@@ -22,7 +22,7 @@
       "id": "gen1autosave",
       "title": "Gen1AutoSave",
       "author": "Wild",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "summary": "Autosaves on a play-time timer and after battles, catches and new areas, with optional rollback backups.",
       "categories": [
         "QOL",

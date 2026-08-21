@@ -34,6 +34,11 @@ does not land on top of a save you just made yourself.
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
 
+If autosaving goes quiet, look for `PAUSED` rather than the usual save
+indicator: an unresolved save sync conflict holds every write until you answer
+the launcher's prompt, and this mod says so once rather than leaving you to
+guess. **MODS > SAVE SYNC**, pick a side, and saving resumes.
+
 ## Working with save sync
 
 `Game:writeSave()` already notifies the sync engine after every successful
