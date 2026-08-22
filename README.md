@@ -36,9 +36,10 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
   own quit writes nothing at all: by then a write can only make a revision
   that never finishes sending, which is half of a "played at the same time"
   conflict.
-- **A Poke Ball that wobbles** in the top right corner when a save lands, in
-  place of a text box across the screen. Switchable to a small `SAVED` panel,
-  the classic text box, or off.
+- **A Poke Ball that wobbles** in the top right corner of the screen when a
+  save lands, in place of a text box across the screen — the screen's corner,
+  not the playfield's, so it stays put on a widescreen window. Switchable to a
+  small `SAVED` panel, the classic text box, or off.
 - **Optional rollback backups** of recent autosaves, reachable from the START
   menu.
 
