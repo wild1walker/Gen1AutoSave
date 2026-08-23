@@ -1,8 +1,12 @@
 <p align="center">
-  <img src="docs/banner.png" alt="Gen1Wild" width="400">
+  <a href="https://wild1walker.github.io/Gen1Wild/"><img src="docs/banner.png" alt="Gen1Wild" width="400"></a>
 </p>
 
 <h1 align="center">Gen1AutoSave</h1>
+
+<p align="center">
+  <a href="https://wild1walker.github.io/Gen1Wild/"><img src="docs/lineup.png" alt="Check out my other mods!" width="880"></a>
+</p>
 
 <p align="center">
   <b>Manual saving, made optional</b><br>
