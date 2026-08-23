@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="docs/banner.png" alt="Gen1AutoSave" width="560">
+  <img src="docs/banner.png" alt="Gen1Wild" width="400">
 </p>
+
+<h1 align="center">Gen1AutoSave</h1>
 
 <p align="center">
   <b>Manual saving, made optional</b><br>
