@@ -1,8 +1,18 @@
-# Gen1AutoSave
+<p align="center">
+  <img src="docs/banner.png" alt="Gen1AutoSave" width="560">
+</p>
 
-An autosave mod for [gen1recomp](https://github.com/bryanthaboi/gen1recomp) that
-makes manual saving optional, and that is deliberately careful around the
-built-in save sync.
+<p align="center">
+  <b>Manual saving, made optional</b><br>
+  An autosave mod for <a href="https://github.com/bryanthaboi/gen1recomp">gen1recomp</a>
+  that is deliberately careful around the built-in save sync.
+</p>
+
+<p align="center">
+  <img src="docs/pokeball-frames.png" alt="the Poke Ball indicator, frame by frame" width="820"><br>
+  <i>The save indicator, frame by frame: a Poke Ball that wobbles in the
+  screen's top right corner instead of a text box across the playfield.</i>
+</p>
 
 ## Installing
 
@@ -46,8 +56,6 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
 Manual saving is untouched: it writes and syncs exactly as it does without this
 mod. The only thing that happens here is the timer resetting, so an autosave
 does not land on top of a save you just made yourself.
-
-![the ball indicator, frame by frame](docs/pokeball-frames.png)
 
 ## Options
 
