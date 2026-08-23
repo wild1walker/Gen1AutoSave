@@ -645,24 +645,15 @@ return function(mod)
     local gw, gh = viewport.gameWidth or 0, viewport.gameHeight or 0
     if gw <= 0 or gh <= 0 then return end
 
-    -- gameX/gameWidth are the PLAYFIELD: the 160x144 game area, which on a
-    -- window wider than 10:9 is a box in the middle with margins either side.
-    -- Its top right corner is not the screen's, and pinning the corner
-    -- indicators there is what put the ball out in open space on a widescreen
-    -- window.  viewX/viewWidth is the whole region the game is given, margins
-    -- included, and is what the renderer scissors to -- so it is both the
-    -- corner the player means and the furthest anything can draw without
-    -- being clipped.  Falling back: the window, then the playfield, for hosts
-    -- that publish neither (the Gen 2 viewport has width/height only).
-    local ax, ay, aw, ah
-    if (viewport.viewWidth or 0) > 0 and (viewport.viewHeight or 0) > 0 then
-      ax, ay = viewport.viewX or 0, viewport.viewY or 0
-      aw, ah = viewport.viewWidth, viewport.viewHeight
-    elseif (viewport.width or 0) > 0 and (viewport.height or 0) > 0 then
-      ax, ay, aw, ah = 0, 0, viewport.width, viewport.height
-    else
-      ax, ay, aw, ah = gx, gy, gw, gh
-    end
+    -- gameX/gameWidth are the PLAYFIELD: the 160x144 picture, letterboxed
+    -- inside whatever window or screen the host gives it whenever that is not
+    -- 10:9.  The corner indicators hang off THAT corner.  The window's corner
+    -- is not the same place and is not what the player means by "top right":
+    -- at a faithful aspect ratio on a phone the picture is a band across the
+    -- middle with the touch controls under it and the status bar above, so a
+    -- ball pinned to the window sat most of a screen clear of the game with
+    -- nothing around it.  A badge belongs on the picture it is a badge for,
+    -- widescreen desktop and faithful-ratio phone alike.
 
     local boxed = mode == "box"
 
@@ -683,10 +674,10 @@ return function(mod)
       local elapsed = NOTIFY_TIME - state.notify
       local alpha = 1
       if state.notify < FADE_TIME then alpha = state.notify / FADE_TIME end
-      local bx = ax + aw - math.floor((BALL_SIZE + BALL_MARGIN) * sx)
-      local by = ay + math.floor(BALL_MARGIN * sy)
-      bx = math.max(ax, math.min(bx, ax + aw - BALL_SIZE * sx))
-      by = math.max(ay, math.min(by, ay + ah - BALL_SIZE * sy))
+      local bx = gx + gw - math.floor((BALL_SIZE + BALL_MARGIN) * sx)
+      local by = gy + math.floor(BALL_MARGIN * sy)
+      bx = math.max(gx, math.min(bx, gx + gw - BALL_SIZE * sx))
+      by = math.max(gy, math.min(by, gy + gh - BALL_SIZE * sy))
       g.push("all")
       g.translate(bx, by)
       g.scale(sx, sy)
@@ -707,23 +698,20 @@ return function(mod)
     local textX = math.floor((panelW - #text * 8) / 2)
 
     -- The text box is the game's own furniture -- it stands in for the box the
-    -- engine would have drawn -- so it stays on the playfield, centred and on
-    -- the bottom edge, whatever the window is doing.  The small corner panel
-    -- is a HUD badge like the ball, so it goes to the screen corner with it.
-    local bx0, by0, bw, bh = ax, ay, aw, ah
-    if boxed then bx0, by0, bw, bh = gx, gy, gw, gh end
-
+    -- engine would have drawn -- so it sits where the engine's boxes sit:
+    -- centred on the playfield's bottom edge.  The small corner panel is a HUD
+    -- badge like the ball, so it takes the playfield's top right with it.
     local x, y
     if boxed then
       x = gx + math.floor((gw - panelW * sx) / 2)
       y = gy + gh - math.floor(panelH * sy)
     else
-      x = ax + aw - math.floor((panelW + ICON_MARGIN) * sx)
-      y = ay + math.floor(ICON_MARGIN * sy)
+      x = gx + gw - math.floor((panelW + ICON_MARGIN) * sx)
+      y = gy + math.floor(ICON_MARGIN * sy)
     end
-    -- never let a rounding error or an odd viewport push it off its own area
-    x = math.max(bx0, math.min(x, bx0 + bw - panelW * sx))
-    y = math.max(by0, math.min(y, by0 + bh - panelH * sy))
+    -- never let a rounding error or an odd viewport push it off the playfield
+    x = math.max(gx, math.min(x, gx + gw - panelW * sx))
+    y = math.max(gy, math.min(y, gy + gh - panelH * sy))
 
     g.push("all")
     g.translate(x, y)
