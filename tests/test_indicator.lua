@@ -1,6 +1,6 @@
 -- Geometry-only check of the indicator panel: replays the same math the mod
 -- uses against a real iPhone-shaped viewport (dpi 3) and a desktop one (dpi 1).
-local BOX_W, ICON_W, ICON_H, ICON_MARGIN = 20, 7, 3, 2
+local BOX_W, ICON_W, ICON_H, HUD_MARGIN = 20, 7, 3, 8
 
 -- Everything hangs off the playfield -- the 160x144 picture -- and not the
 -- window it is letterboxed into, whatever the aspect ratio does to the two.
@@ -20,8 +20,8 @@ local function panel(viewport, boxed)
     x = gx + math.floor((gw - panelW * sx) / 2)
     y = gy + gh - math.floor(panelH * sy)
   else
-    x = gx + gw - math.floor((panelW + ICON_MARGIN) * sx)
-    y = gy + math.floor(ICON_MARGIN * sy)
+    x = gx + gw - math.floor((panelW + HUD_MARGIN) * sx)
+    y = gy + math.floor(HUD_MARGIN * sy)
   end
   x = math.max(gx, math.min(x, gx + gw - panelW * sx))
   y = math.max(gy, math.min(y, gy + gh - panelH * sy))
@@ -76,7 +76,7 @@ check("bare viewport: falls back to playfield width", math.abs(w - 112) < 0.01)
 
 -- ---- ball indicator ----------------------------------------------------
 -- Same tilt/placement math as main.lua, checked as data rather than pixels.
-local BALL_SIZE, BALL_MARGIN = 8, 4
+local BALL_SIZE = 8
 local SHAKE_START, SHAKE_PERIOD, SHAKE_COUNT = 0.18, 0.34, 3
 local NOTIFY_TIME, FADE_TIME = 1.6, 0.25
 
@@ -93,8 +93,8 @@ local function ballRect(v)
   local sx = v.scale / (v.dpiX or 1)
   local sy = v.scale / (v.dpiY or 1)
   local gx, gy, gw, gh = v.gameX, v.gameY, v.gameWidth, v.gameHeight
-  local x = gx + gw - math.floor((BALL_SIZE + BALL_MARGIN) * sx)
-  local y = gy + math.floor(BALL_MARGIN * sy)
+  local x = gx + gw - math.floor((BALL_SIZE + HUD_MARGIN) * sx)
+  local y = gy + math.floor(HUD_MARGIN * sy)
   x = math.max(gx, math.min(x, gx + gw - BALL_SIZE * sx))
   y = math.max(gy, math.min(y, gy + gh - BALL_SIZE * sy))
   return x, y, BALL_SIZE * sx, BALL_SIZE * sy
@@ -134,6 +134,22 @@ print(string.format("       phone ball: %.1f x %.1f units (%.0f%% of width)",
 bx, by, bw, bh = ballRect(desk)
 check("ball inside on desktop too",
   bx >= desk.gameX and bx + bw <= desk.gameX + desk.gameWidth)
+
+-- One tile of clearance on both edges, everywhere: jammed into the corner is
+-- what it looked like at 4 GB pixels on a screen the picture fills.
+local function clearance(v)
+  local x, y, w = ballRect(v)
+  local sx = v.scale / (v.dpiX or 1)
+  local sy = v.scale / (v.dpiY or 1)
+  return ((v.gameX + v.gameWidth) - (x + w)) / sx, (y - v.gameY) / sy
+end
+for _, case in ipairs({ { "phone", phone }, { "desktop", desk } }) do
+  local right, top = clearance(case[2])
+  check(case[1] .. ": ball is a tile clear of the picture's edges",
+    math.abs(right - 8) < 1.01 and math.abs(top - 8) < 1.01)
+  print(string.format("       %s clearance: %.1f right, %.1f top (GB pixels)",
+    case[1], right, top))
+end
 check("fade only in the final quarter second",
   (NOTIFY_TIME - FADE_TIME) > SHAKE_START + SHAKE_PERIOD * SHAKE_COUNT)
 

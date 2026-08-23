@@ -16,10 +16,10 @@ deliberately careful around the built-in save sync.
   that never finishes sending, which is half of a "played at the same time"
   conflict.
 - **A Poke Ball that wobbles** in the top right corner of the game picture
-  when a save lands, in place of a text box across the screen — the picture's
-  corner, so it rides the letterboxed image rather than the window, at a
-  faithful aspect ratio on a phone as much as on a widescreen desktop.
-  Switchable to a small `SAVED` panel, the classic text box, or off.
+  when a save lands, in place of a text box across the screen — one tile in
+  from the picture's own corner, so it rides the letterboxed image rather than
+  the window, under FAITHFUL RATIO on a phone as much as on a widescreen
+  desktop. Switchable to a small `SAVED` panel, the classic text box, or off.
 - **Optional rollback backups** of recent autosaves, reachable from the START
   menu.
 

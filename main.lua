@@ -23,7 +23,13 @@ return function(mod)
 
   local BOX_W, BOX_H = 20, 3
   local ICON_W, ICON_H = 7, 3
-  local ICON_MARGIN = 2     -- GB pixels from the playfield corner
+  -- One 8x8 tile in from the playfield's corner, the same inset the engine
+  -- gives its own furniture.  Both indicators use it, so the ball and the
+  -- SAVED panel land on the same spot.  At 2 and 4 GB pixels they sat all but
+  -- touching the corner, which on a screen the picture fills is close enough
+  -- to the edge to look like a mistake -- and on a phone close enough to go
+  -- under a rounded corner.
+  local HUD_MARGIN = 8
   local MESSAGE_TEXT = "Game saved."
   local ICON_TEXT = "SAVED"
   local HELD_MESSAGE = "Autosave paused."
@@ -589,7 +595,6 @@ return function(mod)
     { 0.97, 0.97, 0.97 },
   }
   local BALL_SIZE = 8
-  local BALL_MARGIN = 4
   local SHAKE_START, SHAKE_PERIOD, SHAKE_COUNT = 0.18, 0.34, 3
   local FADE_TIME = 0.25
 
@@ -674,8 +679,8 @@ return function(mod)
       local elapsed = NOTIFY_TIME - state.notify
       local alpha = 1
       if state.notify < FADE_TIME then alpha = state.notify / FADE_TIME end
-      local bx = gx + gw - math.floor((BALL_SIZE + BALL_MARGIN) * sx)
-      local by = gy + math.floor(BALL_MARGIN * sy)
+      local bx = gx + gw - math.floor((BALL_SIZE + HUD_MARGIN) * sx)
+      local by = gy + math.floor(HUD_MARGIN * sy)
       bx = math.max(gx, math.min(bx, gx + gw - BALL_SIZE * sx))
       by = math.max(gy, math.min(by, gy + gh - BALL_SIZE * sy))
       g.push("all")
@@ -706,8 +711,8 @@ return function(mod)
       x = gx + math.floor((gw - panelW * sx) / 2)
       y = gy + gh - math.floor(panelH * sy)
     else
-      x = gx + gw - math.floor((panelW + ICON_MARGIN) * sx)
-      y = gy + math.floor(ICON_MARGIN * sy)
+      x = gx + gw - math.floor((panelW + HUD_MARGIN) * sx)
+      y = gy + math.floor(HUD_MARGIN * sy)
     end
     -- never let a rounding error or an odd viewport push it off the playfield
     x = math.max(gx, math.min(x, gx + gw - panelW * sx))
