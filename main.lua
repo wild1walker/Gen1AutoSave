@@ -635,6 +635,26 @@ return function(mod)
     end
   end
 
+  -- Is the mobile FAITHFUL RATIO lock on?  This is the whole question behind
+  -- where a corner badge belongs, and the engine answers it exactly this way
+  -- in four places of its own (Renderer:endFrame's screen veil, the battle
+  -- band, the letterbox fills): FaithfulRes.scaleCap() is the locked scale on
+  -- a phone, and nil everywhere else.  Looked up lazily and cached, since a
+  -- Gen 2 host has no such module; the LOCK ITSELF is re-read every time,
+  -- because the player can turn it on and off in OPTIONS mid-game.
+  local FaithfulRes = nil     -- nil = not looked up, false = no such module
+  local function faithfulLock()
+    if FaithfulRes == nil then
+      local ok, loaded = pcall(require, "src.core.FaithfulRes")
+      FaithfulRes = (ok and type(loaded) == "table" and loaded) or false
+    end
+    if not FaithfulRes or type(FaithfulRes.scaleCap) ~= "function" then
+      return false
+    end
+    local ok, cap = pcall(FaithfulRes.scaleCap)
+    return (ok and type(cap) == "number" and cap > 0) or false
+  end
+
   local function drawNotify(viewport)
     if state.notify <= 0 then return end
     local mode = mod.options:get("notify")
@@ -650,15 +670,30 @@ return function(mod)
     local gw, gh = viewport.gameWidth or 0, viewport.gameHeight or 0
     if gw <= 0 or gh <= 0 then return end
 
-    -- gameX/gameWidth are the PLAYFIELD: the 160x144 picture, letterboxed
-    -- inside whatever window or screen the host gives it whenever that is not
-    -- 10:9.  The corner indicators hang off THAT corner.  The window's corner
-    -- is not the same place and is not what the player means by "top right":
-    -- at a faithful aspect ratio on a phone the picture is a band across the
-    -- middle with the touch controls under it and the status bar above, so a
-    -- ball pinned to the window sat most of a screen clear of the game with
-    -- nothing around it.  A badge belongs on the picture it is a badge for,
-    -- widescreen desktop and faithful-ratio phone alike.
+    -- WHERE THE SCREEN IS depends on the FAITHFUL RATIO setting, which is why
+    -- neither rect on its own was ever right.
+    --
+    -- gameX/gameWidth are the 160x144 UI canvas: the picture the engine's own
+    -- text boxes are laid out in.  viewX/viewWidth are the whole surface the
+    -- game is given.  With the lock OFF they are not the same thing and the UI
+    -- canvas is not what the player is looking at -- the world pass is sized
+    -- to cover the entire display, "so letterbox voids become more map instead
+    -- of black bars" (Renderer:worldViewSize), and the UI canvas is only a box
+    -- in the middle where the furniture goes.  A badge on its corner floats in
+    -- the middle of the map.  With the lock ON the world pass is sized to the
+    -- locked viewport instead, and everything outside it is dead display, so
+    -- the picture IS the screen and a badge on the view's corner lands out in
+    -- the black beside the game.
+    --
+    -- So: follow the world pass.  Same rule the engine uses for its own screen
+    -- veil, which stops at the letterbox under the lock and covers the view
+    -- without it.
+    local ax, ay, aw, ah = gx, gy, gw, gh
+    if not faithfulLock()
+       and (viewport.viewWidth or 0) > 0 and (viewport.viewHeight or 0) > 0 then
+      ax, ay = viewport.viewX or 0, viewport.viewY or 0
+      aw, ah = viewport.viewWidth, viewport.viewHeight
+    end
 
     local boxed = mode == "box"
 
@@ -679,10 +714,10 @@ return function(mod)
       local elapsed = NOTIFY_TIME - state.notify
       local alpha = 1
       if state.notify < FADE_TIME then alpha = state.notify / FADE_TIME end
-      local bx = gx + gw - math.floor((BALL_SIZE + HUD_MARGIN) * sx)
-      local by = gy + math.floor(HUD_MARGIN * sy)
-      bx = math.max(gx, math.min(bx, gx + gw - BALL_SIZE * sx))
-      by = math.max(gy, math.min(by, gy + gh - BALL_SIZE * sy))
+      local bx = ax + aw - math.floor((BALL_SIZE + HUD_MARGIN) * sx)
+      local by = ay + math.floor(HUD_MARGIN * sy)
+      bx = math.max(ax, math.min(bx, ax + aw - BALL_SIZE * sx))
+      by = math.max(ay, math.min(by, ay + ah - BALL_SIZE * sy))
       g.push("all")
       g.translate(bx, by)
       g.scale(sx, sy)
@@ -703,20 +738,24 @@ return function(mod)
     local textX = math.floor((panelW - #text * 8) / 2)
 
     -- The text box is the game's own furniture -- it stands in for the box the
-    -- engine would have drawn -- so it sits where the engine's boxes sit:
-    -- centred on the playfield's bottom edge.  The small corner panel is a HUD
-    -- badge like the ball, so it takes the playfield's top right with it.
+    -- engine would have drawn -- so it goes where the engine's boxes go,
+    -- centred on the UI canvas's bottom edge, whatever the rest of the screen
+    -- is doing.  The small corner panel is a HUD badge like the ball, so it
+    -- follows the ball to the screen's corner instead.
+    local bx0, by0, bw0, bh0 = ax, ay, aw, ah
+    if boxed then bx0, by0, bw0, bh0 = gx, gy, gw, gh end
+
     local x, y
     if boxed then
       x = gx + math.floor((gw - panelW * sx) / 2)
       y = gy + gh - math.floor(panelH * sy)
     else
-      x = gx + gw - math.floor((panelW + HUD_MARGIN) * sx)
-      y = gy + math.floor(HUD_MARGIN * sy)
+      x = ax + aw - math.floor((panelW + HUD_MARGIN) * sx)
+      y = ay + math.floor(HUD_MARGIN * sy)
     end
-    -- never let a rounding error or an odd viewport push it off the playfield
-    x = math.max(gx, math.min(x, gx + gw - panelW * sx))
-    y = math.max(gy, math.min(y, gy + gh - panelH * sy))
+    -- never let a rounding error or an odd viewport push it off its own area
+    x = math.max(bx0, math.min(x, bx0 + bw0 - panelW * sx))
+    y = math.max(by0, math.min(y, by0 + bh0 - panelH * sy))
 
     g.push("all")
     g.translate(x, y)
