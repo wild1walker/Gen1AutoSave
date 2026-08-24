@@ -5,9 +5,10 @@ local vetoed = false
 local opts = { enabled = true, interval = 300, events = true, onquit = true, notify = "icon" }
 
 local handlers, chains = {}, {}
+local schema, boxes = nil, {}
 local mod = {
   options = {
-    define = function(_, s) return s end,
+    define = function(_, s) schema = s return s end,
     get = function(_, k) return opts[k] end,
   },
   events = { on = function(_, name, fn)
@@ -16,16 +17,38 @@ local mod = {
   end },
   hooks = { wrap = function(_, name, fn) chains[name] = fn end },
   log = { info = function() end, warn = function(_, f, e) print("WARN", f, e or "") end },
-  ui = nil,
+  ui = {
+    TextBox = { new = function(_, text, _, o)
+      local box = { text = text, opts = o }
+      boxes[#boxes + 1] = box
+      return box
+    end },
+  },
 }
 
 local player = { moving = false }
 local ow = { player = player, scriptMoves = {}, runner = nil }
 local syncState = { busy = false, phase = "idle", uploadAt = nil }
+local screens, returned = {}, 0
 local game = {
   overworld = ow,
-  stack = { top = function() return ow end },
-  writeSave = function() if vetoed then return false end writes = writes + 1 return true end,
+  stack = {
+    top = function() return screens[#screens] or ow end,
+    push = function(_, s) screens[#screens + 1] = s end,
+    pop = function() return table.remove(screens) end,
+  },
+  -- QUIT goes back to the title in-process, so this is where a quit lands
+  returnToTitle = function()
+    returned = returned + 1
+    screens = {}
+  end,
+  writeSave = function()
+    if vetoed then return false end
+    writes = writes + 1
+    -- Game:writeSave notifies sync, which arms its upload debounce
+    syncState.uploadAt = 5
+    return true
+  end,
   -- reads come from syncState, writes go back to it, so the mod disarming
   -- engine.uploadAt is visible to the test rather than lost on a temporary
   syncEngine = function()
@@ -51,6 +74,15 @@ end
 local function check(label, cond)
   print((cond and "PASS  " or "FAIL  ") .. label)
 end
+
+-- 0. what the mod ships with.  The timer is OFF: the events below cover
+-- ordinary play, and the QUIT confirm covers the way out.
+local defaults = {}
+for _, opt in ipairs(schema or {}) do defaults[opt.key] = opt.default end
+check("AUTO SAVE ships on", defaults.enabled == true)
+check("INTERVAL ships OFF", defaults.interval == 0)
+check("AFTER EVENTS ships on", defaults.events == true)
+check("ON QUIT ships on", defaults.onquit == true)
 
 -- 1. idle with nothing happening never writes
 run(400)
@@ -147,33 +179,78 @@ run(250)
 local base = writes
 check("manual save restarts the interval", base == afterTimer + 2)
 
--- 8. the save moved off the quit hook and onto picking QUIT, which is the
+-- 8. the save moved off the quit hook and into the QUIT confirm, which is the
 -- last moment the game is still running: a write inside the quit itself can
 -- only make a revision nothing finishes sending, which is half a conflict.
+-- The box says it is going to save, YES saves, and the quit then waits for
+-- the write and for the upload it starts.
 local function startMenu()
   local items = { { label = "QUIT", onSelect = function() return "quit" end } }
   return chains["ui.start_menu.items"](function(_, i) return i end, game, items)
 end
+local function quitRow()
+  for _, item in ipairs(startMenu()) do
+    if item.label == "QUIT" then return item end
+  end
+end
+local function lastBox() return boxes[#boxes] end
 
 emit("world.stepped")
-local menu = startMenu()
-local quitRow
-for _, item in ipairs(menu) do if item.label == "QUIT" then quitRow = item end end
-check("the QUIT row is still there", quitRow ~= nil)
-check("and still does what it did", quitRow.onSelect() == "quit")
-check("picking QUIT saves first", writes == base + 1)
+check("the QUIT row is still there", quitRow() ~= nil)
+quitRow().onSelect()
+check("picking QUIT writes nothing on its own", writes == base)
+check("it asks first, and says what YES will do",
+  lastBox() ~= nil and lastBox().text:find("SAVE") ~= nil)
+check("the confirm still defaults to NO", lastBox().opts.defaultNo == true)
 
--- nothing changed since, so picking it again writes nothing
-quitRow.onSelect()
-check("picking QUIT again with a clean save writes nothing", writes == base + 1)
+-- NO is the vanilla answer to a vanilla question: nothing saved, nothing quit
+lastBox().opts.choice(false)
+run(1)
+check("answering NO writes nothing", writes == base)
+check("answering NO does not quit", returned == 0)
+
+-- YES: the box goes up, the save lands behind it, and the quit holds for the
+-- upload the write just armed
+quitRow().onSelect()
+lastBox().opts.choice(true)
+run(0.2)
+check("YES puts a saving box up", lastBox().text == "Now saving...")
+check("nothing is written until it has typed out", writes == base)
+lastBox().opts.stay.onShown()
+run(0.1)
+check("the save lands behind the box", writes == base + 1)
+check("and the quit waits on the upload", returned == 0)
+syncState.uploadAt = nil      -- the upload goes
+run(0.1)
+check("the quit follows it once sync is done", returned == 1)
+check("and the box went with the stack", #screens == 0)
+
+-- nothing changed since, so there is nothing to offer: the engine's own
+-- prompt goes up untouched and the row does exactly what it always did
+local boxesSoFar = #boxes
+check("a clean save falls through to the vanilla QUIT",
+  quitRow().onSelect() == "quit")
+check("with no box of ours in front of it", #boxes == boxesSoFar)
+
+-- an upload that never lands must not strand the player in front of the box
+emit("world.stepped")
+quitRow().onSelect()
+lastBox().opts.choice(true)
+run(0.2)
+lastBox().opts.stay.onShown()
+run(1)
+check("the save still lands", writes == base + 2)
+run(20)                       -- uploadAt is never cleared this time
+check("a stuck upload times the quit out instead of trapping it", returned == 2)
 
 -- the engine's own quit hook no longer writes at all, either way out
+local quits = writes
 emit("world.stepped")
 local okQ = chains["core.quit_to_launcher"](function() return false end)
-check("closing the game writes nothing now", writes == base + 1)
+check("closing the game writes nothing now", writes == quits)
 check("the quit verdict is passed through", okQ == false)
 local okL = chains["core.quit_to_launcher"](function() return true end)
-check("stepping back to the launcher writes nothing either", writes == base + 1)
+check("stepping back to the launcher writes nothing either", writes == quits)
 check("the launcher verdict is passed through", okL == true)
 
 -- but it does disarm an upload the exit would otherwise cut open
@@ -181,32 +258,43 @@ syncState.uploadAt = 12.5
 chains["core.quit_to_launcher"](function() return false end)
 check("a scheduled upload is disarmed on the way out", syncState.uploadAt == nil)
 
--- 9. sync still gates the quit save: a conflict or a transfer means skip it
+-- 9. sync still shapes the offer.  A conflict is the one thing this mod never
+-- writes under, so it promises nothing and hands QUIT back to the engine; a
+-- transfer in flight is only a reason to wait, so the save is still offered.
+syncState.uploadAt = nil
 emit("world.stepped")
-syncState.busy = true
-startMenu()[#startMenu()].onSelect()
-check("no quit save while a transfer is in flight", writes == base + 1)
-syncState.busy = false
-
 syncState.phase = "conflict"
-local m2 = startMenu()
-for _, item in ipairs(m2) do if item.label == "QUIT" then item.onSelect() end end
-check("no quit save while a conflict is unresolved", writes == base + 1)
+local boxCount = #boxes
+check("a conflict falls through to the vanilla QUIT",
+  quitRow().onSelect() == "quit")
+check("and puts no box of ours up", #boxes == boxCount)
+check("and writes nothing", writes == quits)
 syncState.phase = "idle"
 
-local m3 = startMenu()
-for _, item in ipairs(m3) do if item.label == "QUIT" then item.onSelect() end end
-check("quit save writes once sync is settled", writes == base + 2)
+syncState.busy = true
+quitRow().onSelect()
+lastBox().opts.choice(true)
+run(0.2)
+lastBox().opts.stay.onShown()
+run(1)
+check("no quit save while a transfer is in flight", writes == quits)
+syncState.busy = false
+run(0.1)
+check("the write lands once the transfer finishes", writes == quits + 1)
+syncState.uploadAt = nil
+run(0.1)
+check("and the quit follows it", returned == 3)
 
 -- 10. a vetoed write does not spin
+local settled = writes
 vetoed = true
 emit("world.stepped")
 run(400)
-check("vetoed write is not retried in a loop", writes == base + 2)
+check("vetoed write is not retried in a loop", writes == settled)
 vetoed = false
 
 -- 11. disabled does nothing
 opts.enabled = false
 emit("world.stepped")
 run(400)
-check("disabled writes nothing", writes == base + 2)
+check("disabled writes nothing", writes == settled)

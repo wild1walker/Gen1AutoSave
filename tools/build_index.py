@@ -42,8 +42,8 @@ CATEGORIES = [
 # The listing-only fields.  summary is the card blurb (200 characters is the
 # index schema's ceiling); tags are lowercase, 24 characters at most.
 LISTING = {
-    "summary": "Autosaves on a play-time timer and after battles, catches and "
-               "new areas, with optional rollback backups.",
+    "summary": "Autosaves after battles, catches and new areas, offers the "
+               "save when you QUIT, and keeps optional rollback backups.",
     "categories": ["QOL", "GAMEPLAY"],
     "tags": ["autosave", "save", "quality of life", "backups", "rollback"],
     "license": "MIT",
