@@ -10,7 +10,8 @@
 --   * never writes while sync is mid-transfer or holding an unresolved
 --     conflict; the save is retried once sync settles
 --   * a floor between writes so an event burst can't hammer the file
---   * writes on the way out to the launcher
+--   * picking QUIT offers the save in the confirm box, and the quit waits
+--     for the write -- and for the upload it starts -- before it leaves
 --
 -- Game:writeSave() already tells the sync engine it happened (5s upload
 -- debounce), so no sync calls are needed here -- only restraint about when.
@@ -34,6 +35,13 @@ return function(mod)
   local ICON_TEXT = "SAVED"
   local HELD_MESSAGE = "Autosave paused."
   local HELD_ICON = "PAUSED"
+
+  -- The QUIT confirm, in place of the engine's "RETURN TO MAIN MENU?": the
+  -- box has to say what YES is about to do, or the save is a surprise.  Both
+  -- lines fit the 18 columns a text box gives them.
+  local QUIT_PROMPT = "SAVE AND RETURN\nTO MAIN MENU?"
+  local QUIT_SAVING = "Now saving..."
+  local QUIT_WAIT = 15      -- seconds the quit will hold for save + upload
 
   local state = {
     clock = 0,
@@ -60,10 +68,14 @@ return function(mod)
       help = "Save progress automatically while you play.",
     },
     {
+      -- OFF by default.  Battles, catches, evolutions, hatches, trades,
+      -- blackouts and every new map already cover ordinary play, and picking
+      -- QUIT covers the way out; a clock on top of that mostly buys writes
+      -- that had nothing new to write.  Still here for anyone who wants one.
       key = "interval",
       type = "choice",
       label = "INTERVAL",
-      default = 300,
+      default = 0,
       choices = {
         { "OFF", 0 },
         { "1 MIN", 60 },
@@ -72,7 +84,7 @@ return function(mod)
         { "10 MIN", 600 },
         { "15 MIN", 900 },
       },
-      help = "Time played between saves. Counts battles and menus too.",
+      help = "An extra save every so much play time. Off: events cover it.",
       visible_if = { key = "enabled", equals = true },
     },
     {
@@ -88,7 +100,7 @@ return function(mod)
       type = "toggle",
       label = "ON QUIT",
       default = true,
-      help = "Save when you pick QUIT, before leaving.",
+      help = "Offer to save in the QUIT confirm, and wait for it.",
       visible_if = { key = "enabled", equals = true },
     },
     {
@@ -163,51 +175,65 @@ return function(mod)
     return true
   end
 
+  -- Everything sync is asked goes through pcall: a host with sync compiled
+  -- out, or a Gen 2 one, answers none of these questions and must not take
+  -- the autosave down with it.
+  local function syncEngineOf(game)
+    local ok, engine = pcall(function() return game:syncEngine() end)
+    if not ok or type(engine) ~= "table" then return nil end
+    return engine
+  end
+
+  local function syncConflicted(engine)
+    local conflict = false
+    pcall(function() conflict = engine.phase == "conflict" end)
+    return conflict
+  end
+
+  local function syncTransferring(engine)
+    local busy = false
+    pcall(function() busy = engine:busy() == true end)
+    return busy
+  end
+
   -- A transfer in flight or a conflict waiting on the player are both reasons
   -- to hold the file still: writing now either races the upload or adds a
   -- third revision to a disagreement the player has not answered yet.
   local function syncSettled(game)
     if state.clock < state.syncWaitUntil then return false end
-    local ok, engine = pcall(function() return game:syncEngine() end)
-    if not ok or type(engine) ~= "table" then return true end
-    local busy, conflict = false, false
-    pcall(function()
-      conflict = engine.phase == "conflict"
-      busy = engine:busy() == true or conflict
-    end)
-    if busy then
+    local engine = syncEngineOf(game)
+    if not engine then return true end
+    local conflict = syncConflicted(engine)
+    if conflict or syncTransferring(engine) then
       state.syncWaitUntil = state.clock + SYNC_RETRY
       return false, conflict and "conflict" or "transfer"
     end
     return true
   end
 
-  -- Returning to the launcher is a process restart (HostShell.restart), so
-  -- whatever the engine has not finished by the time the hook returns never
-  -- finishes.  A PUT already in flight is the dangerous one: the server can
-  -- apply it while the reply dies with the process, leaving this device a
-  -- revision behind without knowing it -- and a local write on top of that is
-  -- the second half of a conflict the player then has to answer, about a save
-  -- only ever touched on one device.
+  -- Does the write we just made still owe sync something?  uploadAt is the
+  -- engine's own debounce field -- set five seconds out by the
+  -- noteSaveWritten inside writeSave, cleared when the upload starts -- and
+  -- busy() covers the request in flight plus the queue behind it.  Both have
+  -- to be clear before the save is anywhere but this device.
   --
-  -- uploadAt is the engine's own debounce field: set when a write is waiting
-  -- to go up, cleared once it has.  It is read rather than called because
-  -- there is no accessor for it, and a pending upload matters here for the
-  -- same reason an in-flight one does -- the restart is going to eat it.
-  local function syncIdleForExit(game)
-    local ok, engine = pcall(function() return game:syncEngine() end)
-    if not ok or type(engine) ~= "table" then return true end
-    local idle = true
+  -- It is read and written directly because there is no accessor for it.  A
+  -- conflict answers neither question: nothing is going up until the player
+  -- resolves it, so it reads as settled and the quit stops waiting.
+  local function syncOwesUpload(engine)
+    local owed = false
     pcall(function()
-      idle = not (engine:busy() == true or engine.phase == "conflict"
-        or engine.uploadAt ~= nil)
+      owed = engine.uploadAt ~= nil or engine:busy() == true
     end)
-    return idle
+    return owed
   end
 
   -- ---------- the write
 
   local function announce(held)
+    -- Not during a quit: the box on screen is already saying it, and in TEXT
+    -- BOX mode the indicator would be drawn straight over it.
+    if state.quit then return end
     if mod.options:get("notify") ~= "off" then
       state.notify = NOTIFY_TIME
       state.held = held == true
@@ -449,37 +475,123 @@ return function(mod)
     }))
   end
 
-  -- Decorate after next(), the documented convention for this hook.
-  -- Picking QUIT is the last moment the game is still fully alive: the confirm
-  -- box is still to come, the engine is still pumping, and an upload started
-  -- here runs its course normally.  Writing at the other end -- inside the
-  -- engine's quit hook, whichever exit it is -- is what kept manufacturing
-  -- conflicts, because a write there can only ever be a revision nothing gets
-  -- to finish sending.
-  local function saveBeforeQuit(game)
-    if not (game and game.writeSave) then return end
-    if not (state.dirty and not state.inBattle) then return end
-    if not syncIdleForExit(game) then return end
+  -- ---------- the quit save
+  --
+  -- Picking QUIT is the last moment the game is still fully alive: the engine
+  -- is still pumping, and an upload started here runs its course normally.
+  -- Writing at the other end -- inside the engine's quit hook, whichever exit
+  -- it is -- is what kept manufacturing conflicts, because a write there can
+  -- only ever be a revision nothing gets to finish sending.
+  --
+  -- So the save goes here, but as an offer rather than a surprise: the
+  -- confirm box says it is going to save, and YES then holds the quit until
+  -- the write and its upload are done.  A save the player did not ask for,
+  -- taken behind a box that says nothing about it, is the same silent write
+  -- this mod spends the rest of its time avoiding.
+
+  -- Is there a save worth offering?  A clean save has nothing to write, and a
+  -- conflict is the one condition this mod never writes under -- in either
+  -- case the vanilla prompt is the honest one, because it promises nothing.
+  local function quitSaveOffered(game)
+    if not (on() and mod.options:get("onquit")) then return false end
+    if type(game.writeSave) ~= "function" then return false end
+    -- the flow ends by quitting itself, so there has to be a quit to make
+    if type(game.returnToTitle) ~= "function" then return false end
+    if not (state.dirty and not state.inBattle) then return false end
+    local engine = syncEngineOf(game)
+    if engine and syncConflicted(engine) then return false end
     local ow = game.overworld
     -- no overworldIdle here: the start menu is on top of it by definition.
     -- Mid-script and mid-step are still reasons to leave the file alone.
-    if not ow then return end
+    if not ow then return false end
     if (ow.runner and ow.runner.isRunning and ow.runner:isRunning())
         or #(ow.scriptMoves or {}) > 0
         or ow.teleportOut or ow.transitioning then
+      return false
+    end
+    return true
+  end
+
+  -- Same defaultNo the engine's own QUIT box uses, so a mis-picked QUIT still
+  -- costs one B press.  YES only parks the request: the text box is still
+  -- tearing itself down here, the same reason the rollback confirm parks its.
+  local function askQuit(game)
+    local TextBox = mod.ui and mod.ui.TextBox
+    if not (TextBox and game.stack) then return false end
+    return pcall(function()
+      game.stack:push(TextBox.new(game, QUIT_PROMPT, nil, {
+        defaultNo = true,
+        choice = function(yes)
+          if yes then state.quit = { waited = 0 } end
+        end,
+      }))
+    end)
+  end
+
+  local function finishQuit(game)
+    local box = state.quit and state.quit.box
+    state.quit = nil
+    state.notify = 0            -- nothing of ours belongs on the title screen
+    if pcall(function() return game:returnToTitle() end) then return end
+    -- returnToTitle empties the stack, hold box and all.  If it somehow did
+    -- not happen, that box is ours to take down rather than leave up.
+    pcall(function()
+      if type(box) == "table" and game.stack:top() == box then
+        game.stack:pop()
+      end
+    end)
+  end
+
+  -- The quit, a frame at a time, behind the game's own "Now saving..." box.
+  -- `stay` is a box that waits for nothing and pops for nobody, so it holds
+  -- the screen -- and the player's input -- until the quit takes it down with
+  -- the rest of the stack.  QUIT_WAIT bounds the whole thing: a save that
+  -- cannot be finished is not worth stranding someone in front of.
+  local function stepQuit(game, dt)
+    local q = state.quit
+    q.waited = q.waited + dt
+    local timedOut = q.waited >= QUIT_WAIT
+
+    if not q.box then
+      local TextBox = mod.ui and mod.ui.TextBox
+      local pushed = TextBox and game.stack and pcall(function()
+        q.box = TextBox.new(game, QUIT_SAVING, nil,
+          { stay = { onShown = function() q.typed = true end } })
+        game.stack:push(q.box)
+      end)
+      -- no box to be had: still save, just without the hold in front of it
+      if not (pushed and q.box) then q.box, q.typed = true, true end
+    end
+    -- The write waits for the box to finish typing, the way the manual save's
+    -- does.  A box that never types out must not strand the quit, though.
+    if not (q.typed or timedOut) then return end
+
+    local engine = syncEngineOf(game)
+    if not q.written then
+      -- a transfer in flight is the same reason to wait here as anywhere
+      -- else: writing under one either races it or hands sync a second
+      -- revision to reconcile
+      if engine and syncTransferring(engine) and not timedOut then return end
+      q.written = true
+      write(game)
+      -- Pull the upload forward.  The five second debounce exists to coalesce
+      -- a burst of writes; on the way out there is no burst coming, only a
+      -- player waiting on this box.
+      if engine then
+        pcall(function()
+          if engine.uploadAt then engine.uploadAt = engine.clock or 0 end
+        end)
+      end
       return
     end
-    captureBackup(game)
-    state.saving = true
-    local ok, err = pcall(game.writeSave, game)
-    state.saving = false
-    if ok then
-      state.dirty = false
-      state.lastWriteAt = state.clock
-      announce()
-    else
-      mod.log:warn("quit save failed: %s", tostring(err))
-    end
+
+    -- The save is on this device; now wait for it to be somewhere else too.
+    -- Timing out costs little: QUIT goes to the title, not out of the
+    -- process, so an upload still running finishes on the title screen --
+    -- unless the player closes the game from under it, which is the case
+    -- this wait is here for.
+    if engine and syncOwesUpload(engine) and not timedOut then return end
+    finishQuit(game)
   end
 
   mod.hooks:wrap("ui.start_menu.items", function(nextFn, game, items)
@@ -493,7 +605,11 @@ return function(mod)
           local original = item.onSelect
           item.gen1autosaveWrapped = true
           item.onSelect = function(...)
-            saveBeforeQuit(game)
+            -- our box replaces the engine's, so it is this or that, never
+            -- both; anything that stops us falls back to the vanilla prompt
+            if not state.quit and quitSaveOffered(game) and askQuit(game) then
+              return
+            end
             return original(...)
           end
         end
@@ -775,6 +891,15 @@ return function(mod)
     state.clock = state.clock + dt
     if state.notify > 0 then state.notify = state.notify - dt end
     clearNotifyText()
+
+    -- A quit in flight outranks everything, and outranks being switched off
+    -- too: whatever else changes, the player is sitting in front of a box
+    -- that only this can take down.
+    if state.quit then
+      stepQuit(game, dt)
+      return
+    end
+
     if not on() then return end
 
     -- A parked rollback outranks everything else this frame.
@@ -833,8 +958,9 @@ return function(mod)
   -- have the same shape: a write here can only produce a revision that
   -- nothing survives to finish sending, and a PUT the server applies while
   -- its reply dies with the process is exactly half of a "played at the same
-  -- time" conflict.  The save that used to live here happens when QUIT is
-  -- picked instead, while there is still a game running to finish it.
+  -- time" conflict.  The save that used to live here happens in the START
+  -- menu's QUIT confirm instead, while there is still a game running to
+  -- finish it -- and that quit waits for the upload before it goes.
   --
   -- What is left is the other half: disarm an upload that has been scheduled
   -- but not started, so the exit cannot cut one open. Nothing is lost by

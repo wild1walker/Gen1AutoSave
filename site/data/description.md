@@ -5,16 +5,20 @@ deliberately careful around the built-in save sync.
 
 ## What it does
 
-- **The timer counts play time, not idle time.** A long gym battle advances it,
-  so `5 MIN` means five minutes of playing rather than five minutes of standing
-  on a route. The write itself still waits for a settled overworld.
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
-  blackouts, entering a new map.
-- **Saves when you pick QUIT**, before the confirm box — the last moment the
-  game is still running, so the upload it starts gets to finish. The engine's
-  own quit writes nothing at all: by then a write can only make a revision
-  that never finishes sending, which is half of a "played at the same time"
-  conflict.
+  blackouts, entering a new map. Between them they cover ordinary play, which
+  is why the clock below ships `OFF`.
+- **QUIT asks, then waits.** Picking `QUIT` puts up `SAVE AND RETURN TO MAIN
+  MENU?` in place of the engine's own confirm. `YES` saves behind a
+  `Now saving...` box and holds the quit until the write *and* the upload it
+  starts are done, so the save reaches the server while there is still a game
+  running to send it. `NO` cancels, exactly as before. Nothing is promised
+  when nothing would be written — with a clean save, or a sync conflict
+  standing, you get the vanilla prompt and the vanilla quit.
+- **An optional play-time timer**, off by default. Turned on, a long gym battle
+  advances it, so `5 MIN` means five minutes of playing rather than five
+  minutes of standing on a route. The write itself still waits for a settled
+  overworld.
 - **A Poke Ball that wobbles** in the top right corner when a save lands, in
   place of a text box across the screen. One tile in from the corner of the
   game itself, which is the window's corner when the map fills it and the
@@ -25,7 +29,7 @@ deliberately careful around the built-in save sync.
   menu.
 
 Manual saving is untouched: it writes and syncs exactly as it does without this
-mod. The only thing that happens here is the timer resetting, so an autosave
+mod. The only thing that happens here is the clock resetting, so an autosave
 does not land on top of a save you just made yourself.
 
 ## Options
@@ -33,9 +37,9 @@ does not land on top of a save you just made yourself.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `AUTO SAVE` | on | Master switch. |
-| `INTERVAL` | 5 MIN | Play time between saves. `OFF` leaves only the event and quit saves. |
+| `INTERVAL` | OFF | An extra save every so much play time, on top of the events. |
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
-| `ON QUIT` | on | Save when you pick QUIT, before leaving. |
+| `ON QUIT` | on | Offer the save in the QUIT confirm, and wait for it. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
