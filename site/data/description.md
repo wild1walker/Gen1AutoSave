@@ -7,7 +7,8 @@ deliberately careful around the built-in save sync.
 
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map. Between them they cover ordinary play, which
-  is why the clock below ships `OFF`.
+  is why the clock below ships `OFF`. Each one saves as soon as the overworld
+  settles, floored at one write every 20 seconds.
 - **QUIT asks, then waits.** Picking `QUIT` puts up `SAVE AND RETURN TO MAIN
   MENU?` in place of the engine's own confirm. `YES` saves behind a
   `Now saving...` box and holds the quit until the write *and* the upload it
