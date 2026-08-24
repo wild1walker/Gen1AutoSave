@@ -153,31 +153,48 @@ syncState.busy = false
 run(30)
 check("and the write lands when it finishes", writes == 6)
 
--- 6c. an event save is floored against other EVENT saves, not against every
--- save: a battle ending just after a timer save used to produce nothing for a
--- whole minute, which reads as "it never saves after battles".
+-- 6c. Events are floored by MIN_GAP and nothing else.  There was a second and
+-- longer floor between two EVENT saves, which held a row of doors to one save
+-- a minute -- and with the timer off by default, that reads as map entry not
+-- being a save trigger at all.
 run(30)                       -- clear MIN_GAP after the last write
 emit("world.stepped")
 run(400)                      -- a timer save lands
 local afterTimer = writes
 emit("battle.ended")          -- a wild battle ends right on its heels
-run(25)                       -- past MIN_GAP, nowhere near EVENT_GAP
+run(25)                       -- past MIN_GAP
 check("a battle just after a timer save still saves", writes == afterTimer + 1)
 
--- but a burst of events in a row is still held to EVENT_GAP
-emit("map.entered")
-run(25)
-check("a second event within EVENT_GAP is held", writes == afterTimer + 1)
-run(40)
-check("and lands once EVENT_GAP has passed", writes == afterTimer + 2)
+emit("map.entered")           -- and a door straight after the battle
+run(3)
+check("a door right after a battle save saves too", writes == afterTimer + 2)
+
+emit("map.entered")           -- but two inside the floor are still one write
+run(5)
+check("a second door inside MIN_GAP is held", writes == afterTimer + 2)
+run(20)
+check("and lands once MIN_GAP has passed", writes == afterTimer + 3)
+
+-- 6d. the reported symptom, end to end: with the timer off, walking a row of
+-- rooms saved at almost none of them.  Every door past the floor saves now.
+opts.interval = 0
+emit("save.loaded")           -- a fresh session, as after CONTINUE
+local doors = writes
+for _ = 1, 4 do
+  emit("map.entered")
+  run(21)
+end
+check("with the timer off, four doors are four saves", writes == doors + 4)
+opts.interval = 300
 
 -- 7. a manual save resets the clock
+local beforeManual = writes
 emit("world.stepped")
 run(100)
 emit("save.writing")
 run(250)
 local base = writes
-check("manual save restarts the interval", base == afterTimer + 2)
+check("manual save restarts the interval", base == beforeManual)
 
 -- 8. the save moved off the quit hook and into the QUIT confirm, which is the
 -- last moment the game is still running: a write inside the quit itself can

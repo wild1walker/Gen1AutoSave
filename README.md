@@ -44,7 +44,8 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
 
 - **Saves after things happen** — battles, catches, evolutions, hatches, trades,
   blackouts, entering a new map. Between them they cover ordinary play, which
-  is why the clock below ships `OFF`.
+  is why the clock below ships `OFF`. Each one saves as soon as the overworld
+  settles, floored at one write every 20 seconds.
 - **QUIT asks, then waits.** Picking `QUIT` puts up `SAVE AND RETURN TO MAIN
   MENU?` in place of the engine's own confirm. `YES` saves behind a
   `Now saving...` box and holds the quit until the write *and* the upload it
@@ -101,12 +102,13 @@ directly. The work is in *not* writing at the wrong moments.
   waiting on you, both hold the file still; the save is retried once sync
   settles. Adding a third revision to a disagreement you have not answered yet
   is how a cross-device conflict gets worse.
-- **Floors between writes.** 20 seconds between any two writes, and 60 between
-  two *event* saves, so a row of door transitions cannot hammer the file. The
-  event floor counts from the last event save rather than from the last save
-  of any kind — measured the other way, a battle that ended just after a timer
-  save produced nothing for a minute, which reads as never saving after
-  battles at all.
+- **One floor between writes.** 20 seconds between any two, whatever asked
+  for them, so a row of door transitions cannot hammer the file. There used to
+  be a second and longer floor between two *event* saves, from when the timer
+  did the steady work and events only had to catch what it missed. Now that
+  the events are the mechanism, that minute meant walking through a row of
+  rooms and saving at none of them — which reads exactly like map entry not
+  being a save trigger at all.
 - **Nothing is written inside the quit itself**, either way out of it. A write
   there can only make a revision nothing survives to finish sending: the
   server applies the PUT, the reply dies with the process, and the device

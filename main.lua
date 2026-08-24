@@ -9,7 +9,7 @@
 --     never bumps the save revision or wakes an upload
 --   * never writes while sync is mid-transfer or holding an unresolved
 --     conflict; the save is retried once sync settles
---   * a floor between writes so an event burst can't hammer the file
+--   * one floor between writes, so a row of doors can't hammer the file
 --   * picking QUIT offers the save in the confirm box, and the quit waits
 --     for the write -- and for the upload it starts -- before it leaves
 --
@@ -18,7 +18,6 @@
 
 return function(mod)
   local MIN_GAP = 20        -- seconds between any two autosaves
-  local EVENT_GAP = 60      -- and between two event-triggered ones
   local SYNC_RETRY = 2.0    -- re-check a busy sync this often
   local NOTIFY_TIME = 1.6
 
@@ -47,10 +46,8 @@ return function(mod)
     clock = 0,
     elapsed = 0,
     lastWriteAt = -math.huge,
-    lastEventAt = -math.huge,
     dirty = false,
     due = false,
-    reason = nil,
     inBattle = false,
     saving = false,
     syncWaitUntil = 0,
@@ -268,32 +265,24 @@ return function(mod)
     state.saving = false
 
     if ok and result ~= false then
-      if state.reason == "event" then state.lastEventAt = state.clock end
       state.elapsed = 0
       state.dirty = false
       state.due = false
-      state.reason = nil
       state.lastWriteAt = state.clock
       announce()
       mod.log:info("autosave written")
     elseif ok then
       -- another mod vetoed this write through save.write; stop asking
       state.due = false
-      state.reason = nil
     else
       state.due = false
-      state.reason = nil
       mod.log:warn("autosave failed: %s", tostring(result))
     end
   end
 
-  local function request(reason)
+  local function request()
     if not on() then return end
     state.due = true
-    -- a timer request outranks an event one: it uses the shorter floor
-    if reason ~= "event" or state.reason == nil then
-      state.reason = reason
-    end
   end
 
   -- ---------- what counts as progress
@@ -324,7 +313,7 @@ return function(mod)
   for _, name in ipairs(CHECKPOINTS) do
     mod.events:on(name, function()
       state.dirty = true
-      if mod.options:get("events") then request("event") end
+      if mod.options:get("events") then request() end
     end)
   end
 
@@ -338,7 +327,6 @@ return function(mod)
     state.elapsed = 0
     state.dirty = false
     state.due = false
-    state.reason = nil
     state.lastWriteAt = state.clock
   end)
 
@@ -346,7 +334,6 @@ return function(mod)
     state.elapsed = 0
     state.dirty = false
     state.due = false
-    state.reason = nil
     state.inBattle = false
     state.notify = 0
     state.heldTold = false
@@ -668,7 +655,7 @@ return function(mod)
       state.dirty = true
       state.lastWriteAt = -math.huge
       state.notifyText = "LOADED"
-      request("timer")
+      request()
       return
     end
     -- These refusals mean "not this frame": a script, an animation or a step
@@ -914,30 +901,25 @@ return function(mod)
     local interval = intervalSeconds()
     if interval > 0 then
       state.elapsed = state.elapsed + dt
-      if state.elapsed >= interval then request("timer") end
+      if state.elapsed >= interval then request() end
     end
 
     if not state.due then return end
     if not state.dirty then
       -- nothing happened; don't spend a revision on it
       state.due = false
-      state.reason = nil
       state.elapsed = 0
       return
     end
-    -- Two floors, because they answer different questions.  MIN_GAP is about
-    -- the file: no two writes closer than this, whatever asked for them.
-    -- EVENT_GAP is about bursts of events -- a row of door transitions -- and
-    -- so it counts from the last event save, not from the last save of any
-    -- kind.  Measuring it from the latter is what made a battle that ended
-    -- just after a timer save produce nothing for a minute: the save was
-    -- real, it simply landed later and somewhere else, which reads exactly
-    -- like "it doesn't save after battles".
+    -- One floor, and it is about the file: no two writes closer than this,
+    -- whatever asked for them.  There was a second and longer one between two
+    -- EVENT saves, from when the timer did the steady work and events only
+    -- had to catch what it missed.  Now that the events are the mechanism, a
+    -- minute between them meant walking through a row of doors and saving at
+    -- none of them -- which reads exactly like map entry not being a trigger
+    -- at all.  MIN_GAP alone still caps a burst at one write per 20 seconds,
+    -- which is the hammering the second floor was really there to stop.
     if state.clock - state.lastWriteAt < MIN_GAP then return end
-    if state.reason == "event"
-        and state.clock - state.lastEventAt < EVENT_GAP then
-      return
-    end
     if not overworldIdle(game) then return end
     local settled, why = syncSettled(game)
     if not settled then
