@@ -13,9 +13,11 @@ name: Release
 #   1. the "version" input of a manual run,
 #   2. "[release X.Y.Z]" anywhere in the commit message,
 #   3. manifest.json's own version, when it is ahead of every existing tag,
-#      so bumping the manifest is the normal way to cut a release,
-#   4. otherwise the newest vX.Y.Z tag with its patch incremented
-#      (0.2.99 rolls over to 0.3.0).
+#      so bumping the manifest is the normal way to cut a release.
+# If none of the three apply the run stops without publishing: a push that
+# changes code or assets but not the version is not a release. (The generated
+# template had a fourth rule here -- patch-bump the newest tag -- which turned
+# every such push into a release.)
 # Whichever wins is written into the manifest.json inside the archive, so a
 # shipped mod never reports a different version than the release it came from.
 #
@@ -92,30 +94,33 @@ jobs:
               override = found.group(1) if found else ""
 
           manifest_ver = parse(manifest_version)
+          if not manifest_ver and not override:
+              die(f"manifest.json version {manifest_version!r} is not X.Y.Z")
+
           if override:
               version = parse(override) or die(f"invalid version override {override!r} (expected X.Y.Z)")
               source = "the override"
-          elif manifest_ver and (latest is None or manifest_ver > latest):
+          elif latest is None or manifest_ver > latest:
               version = manifest_ver
               source = "manifest.json"
-          elif latest:
-              major, minor, patch = latest
-              patch += 1
-              if patch > 99:
-                  minor, patch = minor + 1, 0
-              version = (major, minor, patch)
-              source = "a patch bump on v%d.%d.%d" % latest
           else:
-              die(f"manifest.json version {manifest_version!r} is not X.Y.Z "
-                  "and there is no vX.Y.Z tag to count from")
+              # Nothing to release: no override, and the manifest is not ahead
+              # of what is already tagged. Succeed quietly -- the publishing
+              # steps below are skipped.
+              print(f"manifest.json is at {manifest_version} and v%d.%d.%d is "
+                    "already released; nothing to publish." % latest, file=sys.stderr)
+              print("release=false")
+              raise SystemExit(0)
 
           text = "%d.%d.%d" % version
           print(f"Releasing {text}, from {source}.", file=sys.stderr)
+          print("release=true")
           print(f"version={text}")
           print(f"tag=v{text}")
           PY
 
       - name: Refuse to clobber an existing release
+        if: steps.ver.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
@@ -131,6 +136,7 @@ jobs:
           fi
 
       - name: Build the mod .zip
+        if: steps.ver.outputs.release == 'true'
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           MOD_ID: "gen1autosave"
@@ -183,6 +189,7 @@ jobs:
           cat "$out/sha256sums.txt"
 
       - name: Publish GitHub Release
+        if: steps.ver.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.ver.outputs.version }}
@@ -210,3 +217,16 @@ jobs:
             "dist/sha256sums.txt"
 
           echo "Published release $TAG"
+
+      - name: Note that nothing was released
+        if: steps.ver.outputs.release != 'true'
+        run: |
+          set -euo pipefail
+          {
+            echo "### No release cut"
+            echo
+            echo "\`manifest.json\` is not ahead of the newest tag, so this push"
+            echo "was checked but not published. Bump the version (and add its"
+            echo "\`CHANGELOG.md\` heading) to cut a release, or re-run this"
+            echo "workflow manually with an explicit version."
+          } >> "$GITHUB_STEP_SUMMARY"
