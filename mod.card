@@ -1,0 +1,52 @@
+-- Sharing metadata read by tooling and the mod manager's detail pane; never
+-- by the loader's merge, so an absent or malformed card cannot break a load.
+return {
+  summary = "Saves on its own after battles, catches, evolutions and every "
+    .. "new area, offers the save in the QUIT confirm and waits for it, and "
+    .. "keeps optional rollback backups.",
+  author = "Wild",
+  contact = "https://github.com/wild1walker/Gen1AutoSave",
+  tags = { "autosave", "save", "backups", "quality-of-life" },
+  differences = {
+    changed = {
+      "the START menu's QUIT confirm is replaced with SAVE AND RETURN TO "
+        .. "MAIN MENU?, and YES holds the quit until both the write and the "
+        .. "upload it starts have finished (ON QUIT turns it off)",
+      "manual saving is otherwise untouched -- it writes and syncs exactly "
+        .. "as it does without this mod, and the only effect is that the "
+        .. "interval clock resets so an autosave does not land on top of a "
+        .. "save you just made yourself",
+    },
+    added = {
+      "a save after battles, catches, evolutions, hatches, trades, blackouts "
+        .. "and entering a new map, each one taken once the overworld has "
+        .. "settled (AFTER EVENTS)",
+      "an optional play-time timer on top of those, off by default, which a "
+        .. "long battle advances -- so 5 MIN means five minutes of playing "
+        .. "rather than five minutes of standing still (INTERVAL)",
+      "a Poke Ball that wobbles in the corner when a save lands, instead of "
+        .. "a text box across the screen; also available as a small SAVED "
+        .. "panel, the classic box, or nothing (INDICATOR)",
+      "optional rollback backups of recent autosaves, kept in mod storage, "
+        .. "with a BACKUPS entry in the START menu (SAVE BACKUPS)",
+    },
+    known = {
+      "an unresolved save-sync conflict holds every write until it is "
+        .. "answered.  The indicator reads PAUSED rather than going quiet, "
+        .. "so the reason is on screen: MODS > SAVE SYNC, pick a side, and "
+        .. "saving resumes",
+      "writes are floored at one every 20 seconds, so several events in "
+        .. "quick succession produce one save rather than several",
+      "declared in conflict with recomp-autosave -- run one autosave mod, "
+        .. "not two",
+    },
+  },
+  credits = {
+    { who = "Gen1Recomp", for_ = "the save, battle and map-transition hooks "
+      .. "this mod listens to, and the mod storage the backups live in" },
+    { who = "Nintendo / Creatures / GAME FREAK", for_ = "Pokemon Red, Blue "
+      .. "and Yellow.  Unofficial fan mod, distributed free, no affiliation "
+      .. "and no endorsement" },
+  },
+  compat = { engine = ">=0.0.0-dev <1.0.0", modApi = 2 },
+}
