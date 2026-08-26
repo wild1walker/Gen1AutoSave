@@ -8,7 +8,7 @@
 --   * nothing happened since the last write => no write, so idling on the map
 --     never bumps the save revision or wakes an upload
 --   * never writes while sync is mid-transfer or holding an unresolved
---     conflict; the save is retried once sync settles
+--     conflict OVER THIS SAVE; the save is retried once sync settles
 --   * one floor between writes, so a row of doors can't hammer the file
 --   * picking QUIT offers the save in the confirm box, and the quit waits
 --     for the write -- and for the upload it starts -- before it leaves
@@ -25,6 +25,7 @@
 return function(mod)
   local MIN_GAP = 20        -- seconds between any two autosaves
   local SYNC_RETRY = 2.0    -- re-check a busy sync this often
+  local HOLD_GRACE = 15     -- a conflict has to stand this long to be said
   local NOTIFY_TIME = 1.6
   local GC_STEP = 4096      -- collector work per step, in KB of allocation
   local GC_STEPS = 12       -- ceiling: a cycle on a game-sized heap, no more
@@ -64,6 +65,7 @@ return function(mod)
     syncWasBusy = false,
     notify = 0,
     heldTold = false,
+    heldSince = nil,
     game = nil,
   }
 
@@ -192,10 +194,34 @@ return function(mod)
     return engine
   end
 
+  -- WHOSE conflict is it?  engine.phase is one word for the whole engine, but
+  -- the disagreement it stands for is always about one save: the planner walks
+  -- every local file it can see and raises a row per key that changed on both
+  -- ends (SyncEngine:_planFrom -> _addConflict), so an old playthrough this
+  -- account also has on another device turns the phase to "conflict" while the
+  -- file we are playing is not in dispute at all.  Holding this game's writes
+  -- for that buys nothing -- our save is not the one with two sides.
+  --
+  -- engine.protectedKey is the key of the save being played.  It is not stale:
+  -- Game:syncEngine() re-stamps it from the live save on every call, and
+  -- syncEngineOf just made that call.
+  local function conflictIsOurs(engine)
+    local key, rows
+    pcall(function() key = engine.protectedKey end)
+    pcall(function() rows = engine.conflicts end)
+    -- An engine that cannot say which save it means, or which are in dispute,
+    -- gets the careful answer: assume the hold is ours and leave the file be.
+    if type(key) ~= "string" or type(rows) ~= "table" then return true end
+    for _, row in ipairs(rows) do
+      if type(row) == "table" and row.key == key then return true end
+    end
+    return false
+  end
+
   local function syncConflicted(engine)
     local conflict = false
     pcall(function() conflict = engine.phase == "conflict" end)
-    return conflict
+    return conflict and conflictIsOurs(engine)
   end
 
   local function syncTransferring(engine)
@@ -368,12 +394,32 @@ return function(mod)
     end
   end
 
-  -- An unresolved sync conflict holds every write, with no timeout and no way
-  -- out but the player answering the launcher's prompt -- so staying quiet
-  -- about it reads exactly like the mod having stopped working.  Said once
-  -- per hold, not once per frame: it is a standing condition, not an event.
+  -- An unresolved sync conflict over this save holds every write, and staying
+  -- quiet about that reads exactly like the mod having stopped working.  Said
+  -- once per hold, not once per frame: it is a standing condition, not an
+  -- event.
+  --
+  -- But only once it has actually stood.  "Conflict" was treated here as a
+  -- state only the player can leave, and it is not one: SyncEngine:syncNow()
+  -- empties self.conflicts and re-plans from scratch, and the upload-debounce
+  -- path in SyncEngine:update() reaches it with no phase guard at all -- so a
+  -- conflict raised by one plan can be gone by the next with nobody having
+  -- answered anything.  Announcing on the first frame we see one turns that
+  -- blip into a banner about a prompt the launcher will not be showing by the
+  -- time the player goes to look for it.  A real conflict is waiting on a
+  -- human and will still be here in HOLD_GRACE seconds; a blip will not.
   local function tellHeld(why)
+    -- A transfer is seconds and clears itself: nothing to say, and it is not
+    -- the condition the grace below is timing.
+    if why == "transfer" then
+      state.heldSince = nil
+      return
+    end
+    -- nil is syncSettled inside its own SYNC_RETRY backoff -- no fresh reading
+    -- either way, so the running grace stands rather than restarting.
     if why ~= "conflict" or state.heldTold then return end
+    state.heldSince = state.heldSince or state.clock
+    if state.clock - state.heldSince < HOLD_GRACE then return end
     state.heldTold = true
     announce(true)
     mod.log:warn("autosave held: save sync is waiting on a conflict answer")
@@ -474,6 +520,7 @@ return function(mod)
     state.syncWasBusy = false
     state.notify = 0
     state.heldTold = false
+    state.heldSince = nil
     state.held = false
     state.lastWriteAt = state.clock
   end
@@ -875,6 +922,46 @@ return function(mod)
     end
   end
 
+  -- A held save in POKE BALL mode is a cross, not the word PAUSED: the ball is
+  -- a picture and its failure should be one too, in the same 8x8 slot in the
+  -- same corner, so it reads as this indicator having gone wrong rather than
+  -- as a second kind of furniture arriving.
+  --   1 outline  2 stroke
+  local CROSS = {
+    { 1, 1, 0, 0, 0, 0, 1, 1 },
+    { 1, 2, 1, 0, 0, 1, 2, 1 },
+    { 0, 1, 2, 1, 1, 2, 1, 0 },
+    { 0, 0, 1, 2, 2, 1, 0, 0 },
+    { 0, 0, 1, 2, 2, 1, 0, 0 },
+    { 0, 1, 2, 1, 1, 2, 1, 0 },
+    { 1, 2, 1, 0, 0, 1, 2, 1 },
+    { 1, 1, 0, 0, 0, 0, 1, 1 },
+  }
+  local CROSS_COLORS = {
+    { 0.09, 0.09, 0.09 },     -- the ball's own outline: same family
+    { 0.90, 0.22, 0.20 },     -- a shade off the shell red: this is not a ball
+  }
+  -- It blinks instead of wobbling.  Hard on/off on a fixed period, the way the
+  -- hardware blinks anything, and the off half dims rather than disappears --
+  -- a shape that vanishes outright for 200ms reads as a dropped frame.
+  local BLINK_PERIOD = 0.4
+  local BLINK_DIM = 0.28
+
+  local function drawCross(g, elapsed, alpha)
+    local on = (elapsed % BLINK_PERIOD) < BLINK_PERIOD / 2
+    local a = alpha * (on and 1 or BLINK_DIM)
+    for row = 1, BALL_SIZE do
+      for col = 1, BALL_SIZE do
+        local value = CROSS[row][col]
+        if value ~= 0 then
+          local color = CROSS_COLORS[value]
+          g.setColor(color[1], color[2], color[3], a)
+          g.rectangle("fill", col - 1, row - 1, 1, 1)
+        end
+      end
+    end
+  end
+
   -- Is the mobile FAITHFUL RATIO lock on?  This is the whole question behind
   -- where a corner badge belongs, and the engine answers it exactly this way
   -- in four places of its own (Renderer:endFrame's screen veil, the battle
@@ -903,8 +990,8 @@ return function(mod)
     local g = love and love.graphics
     local Font = mod.ui and mod.ui.Font
     if not (g and viewport) then return end
-    -- a held notice is text even in ball mode, so the font matters there too
-    if not Font and (mode ~= "ball" or state.held) then return end
+    -- ball mode draws both of its states, held included, so it needs no font
+    if not Font and mode ~= "ball" then return end
 
     local gx, gy = viewport.gameX or 0, viewport.gameY or 0
     local gw, gh = viewport.gameWidth or 0, viewport.gameHeight or 0
@@ -949,8 +1036,10 @@ return function(mod)
     if not sy or sy <= 0 then sy = sx end
 
     -- The ball is its own little panel: sprite-sized, top right, and it fades
-    -- on the way out instead of blinking off.
-    if mode == "ball" and not state.held then
+    -- on the way out instead of blinking off.  The held cross shares the slot
+    -- exactly -- same size, same corner, same fade -- so the two never move
+    -- the indicator around between them.
+    if mode == "ball" then
       local elapsed = NOTIFY_TIME - state.notify
       local alpha = 1
       if state.notify < FADE_TIME then alpha = state.notify / FADE_TIME end
@@ -961,7 +1050,11 @@ return function(mod)
       g.push("all")
       g.translate(bx, by)
       g.scale(sx, sy)
-      drawBall(g, elapsed, alpha)
+      if state.held then
+        drawCross(g, elapsed, alpha)
+      else
+        drawBall(g, elapsed, alpha)
+      end
       g.pop()
       return
     end
@@ -1068,6 +1161,7 @@ return function(mod)
       return
     end
     state.heldTold = false
+    state.heldSince = nil
 
     write(game)
   end)

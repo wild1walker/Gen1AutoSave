@@ -61,7 +61,8 @@ installer still refuses an archive whose manifest id is not `gen1autosave`.
   place of a text box across the screen. One tile in from the corner of the
   game itself, which is the window's corner when the map fills it and the
   picture's corner under FAITHFUL RATIO, where the bars around the picture are
-  dead display. Switchable to a small `SAVED` panel, the classic text box, or
+  dead display. On the rare save that gets held, the same slot blinks a red
+  cross instead. Switchable to a small `SAVED` panel, the classic text box, or
   off.
 - **Optional rollback backups** of recent autosaves, reachable from the START
   menu.
@@ -82,10 +83,19 @@ does not land on top of a save you just made yourself.
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
 
-If autosaving goes quiet, look for `PAUSED` rather than the usual save
-indicator: an unresolved save sync conflict holds every write until you answer
-the launcher's prompt, and this mod says so once rather than leaving you to
-guess. **MODS > SAVE SYNC**, pick a side, and saving resumes.
+If autosaving goes quiet, look for the held badge in place of the usual save
+indicator — a **flashing red cross** where the Poke Ball would be, or the word
+`PAUSED` in the text modes. It means an unresolved save sync conflict **over
+the save you are playing** is holding every write: **MODS > SAVE SYNC**, pick a
+side, and saving resumes.
+
+It is deliberately hard to see. The badge waits until the conflict has stood
+for 15 seconds before it says anything, because a conflict is not the
+player-answers-it-or-nothing state it looks like — the engine re-plans from
+scratch on every sync and can raise one and drop it again with nobody having
+touched the launcher. And a conflict about *some other* playthrough no longer
+counts: the engine reports one phase for every save it can see, but only a
+disagreement about this file has any business holding this file.
 
 ## Working with save sync
 
@@ -99,9 +109,12 @@ directly. The work is in *not* writing at the wrong moments.
   save dirty, and a clean save is skipped. Leaving the game sitting on a route
   never bumps the save revision or wakes an upload.
 - **Never writes mid-sync.** A transfer in flight, or an unresolved conflict
-  waiting on you, both hold the file still; the save is retried once sync
-  settles. Adding a third revision to a disagreement you have not answered yet
-  is how a cross-device conflict gets worse.
+  waiting on you *about this save*, both hold the file still; the save is
+  retried once sync settles. Adding a third revision to a disagreement you have
+  not answered yet is how a cross-device conflict gets worse — but the engine's
+  `phase` is one word for every save it can see, and a conflict about an old
+  playthrough on another device is not this file's business, so the hold is
+  matched against `protectedKey` rather than taken at the phase's word.
 - **One floor between writes.** 20 seconds between any two, whatever asked
   for them, so a row of door transitions cannot hammer the file. There used to
   be a second and longer floor between two *event* saves, from when the timer

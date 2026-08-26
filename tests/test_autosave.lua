@@ -28,7 +28,8 @@ local mod = {
 
 local player = { moving = false }
 local ow = { player = player, scriptMoves = {}, runner = nil }
-local syncState = { busy = false, phase = "idle", uploadAt = nil }
+local syncState = { busy = false, phase = "idle", uploadAt = nil,
+                    protectedKey = nil, conflicts = nil }
 local screens, returned = {}, 0
 local game = {
   overworld = ow,
@@ -152,6 +153,76 @@ check("a transfer in flight is not announced", warns == 1)
 syncState.busy = false
 run(30)
 check("and the write lands when it finishes", writes == 6)
+
+-- 6b-2. WHOSE conflict is it?  engine.phase is one word for the whole engine,
+-- but the planner raises a row per key over every local save it can see, so an
+-- old playthrough in dispute on another device turned the phase to "conflict"
+-- and stopped THIS game saving -- about a prompt with nothing to do with it.
+-- protectedKey is the save being played; the rows say which are in dispute.
+syncState.protectedKey = "red/now-playing"
+syncState.conflicts = { { key = "red/some-other-run" } }
+syncState.phase = "conflict"
+run(30)                       -- clear MIN_GAP after the last write
+local before = writes
+emit("battle.ended")
+run(30)
+check("a conflict over another save does not hold this one", writes == before + 1)
+check("and is not announced", warns == 1)
+
+-- our own key in that same list is still a hold, and still gets said
+syncState.conflicts = { { key = "red/some-other-run" }, { key = "red/now-playing" } }
+run(30)
+before = writes
+emit("battle.ended")
+run(60)                       -- past HOLD_GRACE
+check("a conflict over this save does hold it", writes == before)
+check("and that one is announced", warns == 2)
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+check("and the write lands once it clears", writes == before + 1)
+
+-- 6b-3. A conflict that does not stand is not worth telling anyone about.
+-- SyncEngine:syncNow() empties its conflict list and re-plans, and the upload
+-- debounce path in SyncEngine:update() reaches it with no phase guard at all,
+-- so a conflict can come and go with nobody answering anything.  Said on the
+-- first frame, that blip is a badge about a launcher prompt that is already
+-- gone by the time the player goes to look for it.
+local HOLD_GRACE = 15         -- mirrors main.lua
+run(30)                       -- clear MIN_GAP
+before = writes
+syncState.phase = "conflict"
+emit("battle.ended")
+run(HOLD_GRACE - 5)
+check("a conflict shorter than the grace says nothing", warns == 2)
+check("though it still holds the write while it lasts", writes == before)
+syncState.phase = "idle"
+run(30)
+check("and the held write lands as soon as it clears", writes == before + 1)
+
+-- and the next blip starts its own grace rather than inheriting that one's
+run(30)
+before = writes
+syncState.phase = "conflict"
+emit("battle.ended")
+run(HOLD_GRACE - 5)
+check("the next short hold starts its grace over", warns == 2)
+syncState.phase = "idle"
+run(30)
+check("and it lands too", writes == before + 1)
+
+-- a conflict that really does stand still gets said, on the far side of both
+run(30)
+before = writes
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("a standing conflict is still announced", warns == 3)
+check("and still holds the file", writes == before)
+syncState.phase = "idle"
+syncState.protectedKey = nil
+run(30)
+check("and still resumes when it clears", writes == before + 1)
 
 -- 6c. Events are floored by MIN_GAP and nothing else.  There was a second and
 -- longer floor between two EVENT saves, which held a row of doors to one save
