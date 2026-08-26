@@ -122,6 +122,48 @@ directly. The work is in *not* writing at the wrong moments.
   out of the process and an upload still running finishes there. All the quit
   hook does now is disarm an upload that was scheduled but not started, so the
   exit cannot cut one open; the next launch uploads it as an ordinary change.
+- **One upload woken per five minutes, not one per save.** Planning a sync runs
+  on the main thread, and it reads and *decodes* every save slot of every game
+  version before any of it reaches a worker — through the restricted-grammar
+  reader, which is a character-at-a-time parser written in Lua on purpose, so a
+  tampered save fails to parse instead of executing. A quarter-megabyte slot
+  costs tens of milliseconds, per slot on disk, across six versions, and a
+  phone is worse. Waking that on every autosave — as often as every 20 seconds,
+  with `AFTER EVENTS` on — was the loudest thing this mod did to a linked
+  device. So an autosave wakes an upload at most every five minutes. Writes in
+  between still land on disk; the engine's own five minute sweep carries them
+  up, because planning compares each slot's `savedAt` against the revision it
+  last saw and uploads anything that moved. Picking `QUIT` is exempt: there is
+  no sweep coming for a game that is about to stop running, so that upload has
+  to go now or never.
+
+## The frame after a save
+
+The lag around an autosave is mostly not the write. It is the collection of
+what the write threw away, and it lands a beat later — which is why it reads as
+the game stuttering rather than as the game saving.
+
+A save copies the progress table, serializes the copy into one large string,
+reads the previous file back to make the `.bak`, writes that string twice more
+and rewrites `options.lua` beside it — and with backups on, deep-copies the
+save twice more and serializes that too. Megabytes of short-lived strings, in
+one frame. The engine's collector budget is one small step per rendered frame,
+sized (by its own comment) for "ordinary Lua-heap garbage — per-frame tables
+and closures". A save is a year of that at once, so the collector falls behind,
+and the part of a cycle that cannot be split surfaces a second or two later, in
+a frame that is just ordinary walking.
+
+So the mod finishes the cycle itself, in the frame that already stopped to
+touch the disk and is showing you a Poke Ball while it does. The work is the
+same work; paying for it at the save spends a frame you have been told to
+expect instead of a slow patch of route afterwards you have not. It is bounded
+— a fixed number of steps, stopping the moment the cycle completes — so a large
+heap on a phone cannot turn one hitch into a freeze.
+
+A sync cycle leaves the same debt, more of it: planning decoded every slot into
+a full table again, a character at a time. So the same catch-up runs in the
+frame a cycle finishes on — every cycle, not only the ones an autosave woke,
+since after the pacing above most of them are the engine's own sweep.
 
 ## Backups
 
