@@ -2,7 +2,8 @@
 local writes = 0
 local vetoed = false
 
-local opts = { enabled = true, interval = 300, events = true, onquit = true, notify = "icon" }
+local opts = { enabled = true, interval = 300, events = true, onquit = true,
+               notify = "icon", heal = true }
 
 local handlers, chains = {}, {}
 local schema, boxes = nil, {}
@@ -84,6 +85,7 @@ check("AUTO SAVE ships on", defaults.enabled == true)
 check("INTERVAL ships OFF", defaults.interval == 0)
 check("AFTER EVENTS ships on", defaults.events == true)
 check("ON QUIT ships on", defaults.onquit == true)
+check("HEAL CONFLICTS ships on", defaults.heal == true)
 
 -- 1. idle with nothing happening never writes
 run(400)
@@ -259,6 +261,102 @@ syncState.conflicts = nil
 syncState.protectedKey = nil
 run(30)
 check("and still resumes after that one clears", writes == before + 1)
+
+-- 6b-5. The conflict that is not one.  SyncEngine.overlaps compares
+-- [sessionStart, savedAt] on the two sides, and ONE sessionStart covers a whole
+-- play session -- so this device's own lost upload always reads as "played at
+-- the same time".  Both sides carrying the SAME sessionStart is the tell: a
+-- second device calls os.time() for its own, on its own load.
+local resolved = {}
+local function selfRow(mine, theirs, session)
+  return { { key = "red/now-playing",
+             localMeta = { sessionStart = session, savedAt = mine },
+             remoteMeta = { sessionStart = session, savedAt = theirs } } }
+end
+local session = at(21, 10)
+syncState.resolveConflict = function(_, key, choice)
+  resolved[#resolved + 1] = { key = key, choice = choice }
+  syncState.phase = "idle"          -- what the launcher's button gets to
+  syncState.conflicts = nil
+  return true
+end
+
+run(30)
+local w0 = warns
+before = writes
+syncState.protectedKey = "red/now-playing"
+syncState.conflicts = selfRow(at(21, 42), at(21, 37), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(60)
+check("a self-conflict is answered, not held", #resolved == 1)
+check("with keep-this-device", resolved[1].choice == "local")
+check("on the key we are playing", resolved[1].key == "red/now-playing")
+check("nothing was said about it", warns == w0)
+check("and the write it was holding lands", writes == before + 1)
+
+-- two real sessions is a real disagreement: left alone, badge and all
+run(30)
+resolved, w0, before = {}, warns, writes
+syncState.conflicts = { { key = "red/now-playing",
+  localMeta = { sessionStart = at(21, 10), savedAt = at(21, 42) },
+  remoteMeta = { sessionStart = at(9, 0), savedAt = at(21, 37) } } }
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("two sessions is not ours to answer", #resolved == 0)
+check("so it is still held", writes == before)
+check("and still said", warns == w0 + 1)
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+
+-- one session, but the far side is AHEAD of us: not a superseded upload, so
+-- not something keep-this-device is obviously right about
+resolved, w0, before = {}, warns, writes
+syncState.conflicts = selfRow(at(21, 37), at(21, 42), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("a far side ahead of ours is not answered either", #resolved == 0)
+check("and is held", writes == before)
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+
+-- HEAL CONFLICTS off puts every one of them back in front of the player
+resolved, w0, before = {}, warns, writes
+opts.heal = false
+syncState.conflicts = selfRow(at(21, 42), at(21, 37), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("HEAL CONFLICTS off answers nothing", #resolved == 0)
+check("and holds as it used to", writes == before)
+opts.heal = true
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+
+-- a heal that will not stick is capped, and then it is a hold like any other
+resolved, w0, before = {}, warns, writes
+syncState.resolveConflict = function(_, key, choice)
+  resolved[#resolved + 1] = { key = key, choice = choice }
+  return true                       -- says yes, changes nothing: back it comes
+end
+syncState.conflicts = selfRow(at(21, 42), at(21, 37), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("a heal that does not take is capped at three", #resolved == 3)
+check("and then it is a hold like any other", writes == before)
+check("which does get said", warns == w0 + 1)
+syncState.phase = "idle"
+syncState.conflicts = nil
+syncState.protectedKey = nil
+syncState.resolveConflict = nil
+run(30)
+check("and clears when the conflict does", writes == before + 1)
 
 -- 6c. Events are floored by MIN_GAP and nothing else.  There was a second and
 -- longer floor between two EVENT saves, which held a row of doors to one save
