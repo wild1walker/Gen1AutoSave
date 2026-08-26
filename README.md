@@ -15,9 +15,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/pokeball-frames.png" alt="the Poke Ball indicator, frame by frame" width="820"><br>
-  <i>The save indicator, frame by frame: a Poke Ball that wobbles in the
-  screen's top right corner instead of a text box across the playfield.</i>
+  <img src="docs/pokeball-frames.png" alt="the save indicator, frame by frame: a Poke Ball wobbling, and a cross blinking" width="820"><br>
+  <i>The save indicator, frame by frame, in the screen's top right corner
+  instead of a text box across the playfield: a Poke Ball that wobbles when a
+  save lands, and a cross that blinks when one is held.<br>
+  Drawn from main.lua by <code>tools/logo/frames.py</code>.</i>
 </p>
 
 ## Installing
