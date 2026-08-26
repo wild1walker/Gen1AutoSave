@@ -1,7 +1,7 @@
 {
   "id": "gen1autosave",
   "name": "Gen1AutoSave",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "api": 2,
   "games": [
     "all"
@@ -17,7 +17,7 @@
   "conflicts": [
     "recomp-autosave"
   ],
-  "description": "Saves on its own so manual saving is optional: after battles, catches, evolutions and every new area, plus a save offered in the START menu's QUIT confirm that the quit itself waits for. An optional play-time timer on top of that. Optional rollback backups of recent autosaves, kept in mod storage with a BACKUPS entry in the START menu. Skips writes when nothing changed and stays quiet while save sync is transferring or holding a conflict.",
+  "description": "Saves on its own so manual saving is optional: after battles, catches, evolutions and every new area, plus a save offered in the START menu's QUIT confirm that the quit itself waits for. An optional play-time timer on top of that. Optional rollback backups of recent autosaves, kept in mod storage with a BACKUPS entry in the START menu. Skips writes when nothing changed, stays quiet while save sync is transferring, and answers the \"conflicts\" that are really this device's own lost upload instead of putting them to you.",
   "github": "wild1walker/Gen1AutoSave",
   "author": "Wild"
 }

@@ -2,7 +2,8 @@
 local writes = 0
 local vetoed = false
 
-local opts = { enabled = true, interval = 300, events = true, onquit = true, notify = "icon" }
+local opts = { enabled = true, interval = 300, events = true, onquit = true,
+               notify = "icon", heal = true }
 
 local handlers, chains = {}, {}
 local schema, boxes = nil, {}
@@ -28,7 +29,8 @@ local mod = {
 
 local player = { moving = false }
 local ow = { player = player, scriptMoves = {}, runner = nil }
-local syncState = { busy = false, phase = "idle", uploadAt = nil }
+local syncState = { busy = false, phase = "idle", uploadAt = nil,
+                    protectedKey = nil, conflicts = nil }
 local screens, returned = {}, 0
 local game = {
   overworld = ow,
@@ -83,6 +85,7 @@ check("AUTO SAVE ships on", defaults.enabled == true)
 check("INTERVAL ships OFF", defaults.interval == 0)
 check("AFTER EVENTS ships on", defaults.events == true)
 check("ON QUIT ships on", defaults.onquit == true)
+check("HEAL CONFLICTS ships on", defaults.heal == true)
 
 -- 1. idle with nothing happening never writes
 run(400)
@@ -131,8 +134,11 @@ check("resumes after the conflict clears", writes == 4)
 -- 6b. a conflict is a standing hold with no timeout, so it gets said out loud
 -- once -- silence here is indistinguishable from the mod having died, which
 -- is what "it stopped saving after battles" actually is.
-local warns = 0
-mod.log.warn = function() warns = warns + 1 end
+local warns, lastWarn = 0, nil
+mod.log.warn = function(_, fmt, ...)
+  warns = warns + 1
+  lastWarn = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+end
 emit("world.stepped")
 syncState.phase = "conflict"
 run(400)
@@ -152,6 +158,205 @@ check("a transfer in flight is not announced", warns == 1)
 syncState.busy = false
 run(30)
 check("and the write lands when it finishes", writes == 6)
+
+-- 6b-2. WHOSE conflict is it?  engine.phase is one word for the whole engine,
+-- but the planner raises a row per key over every local save it can see, so an
+-- old playthrough in dispute on another device turned the phase to "conflict"
+-- and stopped THIS game saving -- about a prompt with nothing to do with it.
+-- protectedKey is the save being played; the rows say which are in dispute.
+syncState.protectedKey = "red/now-playing"
+syncState.conflicts = { { key = "red/some-other-run" } }
+syncState.phase = "conflict"
+run(30)                       -- clear MIN_GAP after the last write
+local before = writes
+emit("battle.ended")
+run(30)
+check("a conflict over another save does not hold this one", writes == before + 1)
+check("and is not announced", warns == 1)
+
+-- our own key in that same list is still a hold, and still gets said
+syncState.conflicts = { { key = "red/some-other-run" }, { key = "red/now-playing" } }
+run(30)
+before = writes
+emit("battle.ended")
+run(60)                       -- past HOLD_GRACE
+check("a conflict over this save does hold it", writes == before)
+check("and that one is announced", warns == 2)
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+check("and the write lands once it clears", writes == before + 1)
+
+-- 6b-3. A conflict that does not stand is not worth telling anyone about.
+-- SyncEngine:syncNow() empties its conflict list and re-plans, and the upload
+-- debounce path in SyncEngine:update() reaches it with no phase guard at all,
+-- so a conflict can come and go with nobody answering anything.  Said on the
+-- first frame, that blip is a badge about a launcher prompt that is already
+-- gone by the time the player goes to look for it.
+local HOLD_GRACE = 15         -- mirrors main.lua
+run(30)                       -- clear MIN_GAP
+before = writes
+syncState.phase = "conflict"
+emit("battle.ended")
+run(HOLD_GRACE - 5)
+check("a conflict shorter than the grace says nothing", warns == 2)
+check("though it still holds the write while it lasts", writes == before)
+syncState.phase = "idle"
+run(30)
+check("and the held write lands as soon as it clears", writes == before + 1)
+
+-- and the next blip starts its own grace rather than inheriting that one's
+run(30)
+before = writes
+syncState.phase = "conflict"
+emit("battle.ended")
+run(HOLD_GRACE - 5)
+check("the next short hold starts its grace over", warns == 2)
+syncState.phase = "idle"
+run(30)
+check("and it lands too", writes == before + 1)
+
+-- a conflict that really does stand still gets said, on the far side of both
+run(30)
+before = writes
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("a standing conflict is still announced", warns == 3)
+check("and still holds the file", writes == before)
+syncState.phase = "idle"
+run(30)
+check("and still resumes when it clears", writes == before + 1)
+
+-- 6b-4. And it says WHICH conflict.  "A conflict is standing" is not something
+-- a player can go and check -- least of all while the launcher's SAVE SYNC
+-- screen is still empty, which it is from every launch until the first sweep
+-- runs (SyncEngine builds eng.conflicts empty on load and never restores
+-- state.pendingConflicts into it).  The two savedAt stamps are the same line
+-- that screen shows once it catches up.
+local function at(hour, min)
+  return os.time({ year = 2026, month = 8, day = 25, hour = hour, min = min,
+                   sec = 0 })
+end
+run(30)
+before = writes
+syncState.conflicts = {
+  { key = "red/some-other-run", localMeta = { savedAt = at(9, 0) } },
+  { key = "red/now-playing",
+    localMeta = { savedAt = at(21, 42) },
+    remoteMeta = { savedAt = at(21, 37) } },
+}
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("the held line names the key in dispute",
+  (lastWarn or ""):find("red/now%-playing") ~= nil)
+check("and this device's stamp", (lastWarn or ""):find("21:42") ~= nil)
+check("and the other device's", (lastWarn or ""):find("21:37") ~= nil)
+check("and not the row that is none of our business",
+  (lastWarn or ""):find("some%-other%-run") == nil)
+check("and it is still holding the file", writes == before)
+syncState.phase = "idle"
+syncState.conflicts = nil
+syncState.protectedKey = nil
+run(30)
+check("and still resumes after that one clears", writes == before + 1)
+
+-- 6b-5. The conflict that is not one.  SyncEngine.overlaps compares
+-- [sessionStart, savedAt] on the two sides, and ONE sessionStart covers a whole
+-- play session -- so this device's own lost upload always reads as "played at
+-- the same time".  Both sides carrying the SAME sessionStart is the tell: a
+-- second device calls os.time() for its own, on its own load.
+local resolved = {}
+local function selfRow(mine, theirs, session)
+  return { { key = "red/now-playing",
+             localMeta = { sessionStart = session, savedAt = mine },
+             remoteMeta = { sessionStart = session, savedAt = theirs } } }
+end
+local session = at(21, 10)
+syncState.resolveConflict = function(_, key, choice)
+  resolved[#resolved + 1] = { key = key, choice = choice }
+  syncState.phase = "idle"          -- what the launcher's button gets to
+  syncState.conflicts = nil
+  return true
+end
+
+run(30)
+local w0 = warns
+before = writes
+syncState.protectedKey = "red/now-playing"
+syncState.conflicts = selfRow(at(21, 42), at(21, 37), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(60)
+check("a self-conflict is answered, not held", #resolved == 1)
+check("with keep-this-device", resolved[1].choice == "local")
+check("on the key we are playing", resolved[1].key == "red/now-playing")
+check("nothing was said about it", warns == w0)
+check("and the write it was holding lands", writes == before + 1)
+
+-- two real sessions is a real disagreement: left alone, badge and all
+run(30)
+resolved, w0, before = {}, warns, writes
+syncState.conflicts = { { key = "red/now-playing",
+  localMeta = { sessionStart = at(21, 10), savedAt = at(21, 42) },
+  remoteMeta = { sessionStart = at(9, 0), savedAt = at(21, 37) } } }
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("two sessions is not ours to answer", #resolved == 0)
+check("so it is still held", writes == before)
+check("and still said", warns == w0 + 1)
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+
+-- one session, but the far side is AHEAD of us: not a superseded upload, so
+-- not something keep-this-device is obviously right about
+resolved, w0, before = {}, warns, writes
+syncState.conflicts = selfRow(at(21, 37), at(21, 42), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("a far side ahead of ours is not answered either", #resolved == 0)
+check("and is held", writes == before)
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+
+-- HEAL CONFLICTS off puts every one of them back in front of the player
+resolved, w0, before = {}, warns, writes
+opts.heal = false
+syncState.conflicts = selfRow(at(21, 42), at(21, 37), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("HEAL CONFLICTS off answers nothing", #resolved == 0)
+check("and holds as it used to", writes == before)
+opts.heal = true
+syncState.phase = "idle"
+syncState.conflicts = nil
+run(30)
+
+-- a heal that will not stick is capped, and then it is a hold like any other
+resolved, w0, before = {}, warns, writes
+syncState.resolveConflict = function(_, key, choice)
+  resolved[#resolved + 1] = { key = key, choice = choice }
+  return true                       -- says yes, changes nothing: back it comes
+end
+syncState.conflicts = selfRow(at(21, 42), at(21, 37), session)
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("a heal that does not take is capped at three", #resolved == 3)
+check("and then it is a hold like any other", writes == before)
+check("which does get said", warns == w0 + 1)
+syncState.phase = "idle"
+syncState.conflicts = nil
+syncState.protectedKey = nil
+syncState.resolveConflict = nil
+run(30)
+check("and clears when the conflict does", writes == before + 1)
 
 -- 6c. Events are floored by MIN_GAP and nothing else.  There was a second and
 -- longer floor between two EVENT saves, which held a row of doors to one save
