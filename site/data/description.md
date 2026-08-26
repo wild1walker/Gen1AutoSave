@@ -49,16 +49,25 @@ does not land on top of a save you just made yourself.
 If autosaving goes quiet, look for the held badge in place of the usual save
 indicator — a **flashing red cross** where the Poke Ball would be, or the word
 `PAUSED` in the text modes. It means an unresolved save sync conflict **over
-the save you are playing** is holding every write: **MODS > SAVE SYNC**, pick a
+the save you are playing** is holding every write. **MODS > SAVE SYNC**, pick a
 side, and saving resumes.
 
-It is deliberately hard to see. The badge waits until the conflict has stood
-for 15 seconds before it says anything, because a conflict is not the
-player-answers-it-or-nothing state it looks like — the engine re-plans from
-scratch on every sync and can raise one and drop it again with nobody having
-touched the launcher. And a conflict about *some other* playthrough no longer
-counts: the engine reports one phase for every save it can see, but only a
-disagreement about this file has any business holding this file.
+**If that screen looks empty, the conflict has not gone away.** The launcher
+draws it from rows the engine holds in memory, and those do not survive a
+restart: `SyncEngine` persists `state.pendingConflicts` but builds `conflicts`
+empty on load, and empties it again at the start of every sync. So there is a
+window after each launch — up to five minutes, until the first sweep runs — and
+a shorter one around every sync, where the badge is right and the screen has
+nothing on it yet. Give it a moment and look again. The mod's log line names
+the conflict it is holding for, with both savedAt stamps, so you can tell which
+of the two it means before the screen catches up.
+
+The badge is slow on purpose, and quiet about things that are not yours. It
+waits until the conflict has stood for fifteen seconds, and it ignores
+conflicts about any *other* playthrough. The engine reports one `phase` for
+every save it can see and re-plans from scratch on every sync, so neither
+"there is a conflict" nor "there is one this instant" means this file is the
+one in dispute.
 
 ## Working with save sync
 

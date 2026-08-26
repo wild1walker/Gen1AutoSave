@@ -218,6 +218,31 @@ return function(mod)
     return false
   end
 
+  -- Which conflict, in the terms the launcher's own screen uses for it: two
+  -- savedAt stamps and the key they disagree about.  "A conflict is standing"
+  -- is not something a player can go and check; "this device 21:42, other
+  -- device 21:37" is the same line the SAVE SYNC screen will show them.
+  local function conflictDetail(engine)
+    local key, rows
+    pcall(function() key = engine.protectedKey end)
+    pcall(function() rows = engine.conflicts end)
+    if type(rows) ~= "table" then return nil end
+    local function when(meta)
+      local at = type(meta) == "table" and tonumber(meta.savedAt)
+      local ok, text = pcall(os.date, "%Y-%m-%d %H:%M", at or 0)
+      return (at and ok) and text or "?"
+    end
+    for _, row in ipairs(rows) do
+      -- no key to match on means we already gave the hold the careful reading,
+      -- so describe the row that reading was about: the first one
+      if type(row) == "table" and (type(key) ~= "string" or row.key == key) then
+        return string.format("%s (this device %s, other device %s)",
+          tostring(row.key), when(row.localMeta), when(row.remoteMeta))
+      end
+    end
+    return nil
+  end
+
   local function syncConflicted(engine)
     local conflict = false
     pcall(function() conflict = engine.phase == "conflict" end)
@@ -408,7 +433,7 @@ return function(mod)
   -- blip into a banner about a prompt the launcher will not be showing by the
   -- time the player goes to look for it.  A real conflict is waiting on a
   -- human and will still be here in HOLD_GRACE seconds; a blip will not.
-  local function tellHeld(why)
+  local function tellHeld(why, game)
     -- A transfer is seconds and clears itself: nothing to say, and it is not
     -- the condition the grace below is timing.
     if why == "transfer" then
@@ -422,7 +447,14 @@ return function(mod)
     if state.clock - state.heldSince < HOLD_GRACE then return end
     state.heldTold = true
     announce(true)
-    mod.log:warn("autosave held: save sync is waiting on a conflict answer")
+    local engine = game and syncEngineOf(game)
+    local detail = engine and conflictDetail(engine)
+    if detail then
+      mod.log:warn("autosave held: save sync is waiting on an answer to %s",
+        detail)
+    else
+      mod.log:warn("autosave held: save sync is waiting on a conflict answer")
+    end
   end
 
   local function write(game)
@@ -1157,7 +1189,7 @@ return function(mod)
     if not overworldIdle(game) then return end
     local settled, why = syncSettled(game)
     if not settled then
-      tellHeld(why)
+      tellHeld(why, game)
       return
     end
     state.heldTold = false

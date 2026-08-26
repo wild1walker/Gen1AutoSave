@@ -132,8 +132,11 @@ check("resumes after the conflict clears", writes == 4)
 -- 6b. a conflict is a standing hold with no timeout, so it gets said out loud
 -- once -- silence here is indistinguishable from the mod having died, which
 -- is what "it stopped saving after battles" actually is.
-local warns = 0
-mod.log.warn = function() warns = warns + 1 end
+local warns, lastWarn = 0, nil
+mod.log.warn = function(_, fmt, ...)
+  warns = warns + 1
+  lastWarn = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+end
 emit("world.stepped")
 syncState.phase = "conflict"
 run(400)
@@ -220,9 +223,42 @@ run(400)
 check("a standing conflict is still announced", warns == 3)
 check("and still holds the file", writes == before)
 syncState.phase = "idle"
-syncState.protectedKey = nil
 run(30)
 check("and still resumes when it clears", writes == before + 1)
+
+-- 6b-4. And it says WHICH conflict.  "A conflict is standing" is not something
+-- a player can go and check -- least of all while the launcher's SAVE SYNC
+-- screen is still empty, which it is from every launch until the first sweep
+-- runs (SyncEngine builds eng.conflicts empty on load and never restores
+-- state.pendingConflicts into it).  The two savedAt stamps are the same line
+-- that screen shows once it catches up.
+local function at(hour, min)
+  return os.time({ year = 2026, month = 8, day = 25, hour = hour, min = min,
+                   sec = 0 })
+end
+run(30)
+before = writes
+syncState.conflicts = {
+  { key = "red/some-other-run", localMeta = { savedAt = at(9, 0) } },
+  { key = "red/now-playing",
+    localMeta = { savedAt = at(21, 42) },
+    remoteMeta = { savedAt = at(21, 37) } },
+}
+syncState.phase = "conflict"
+emit("battle.ended")
+run(400)
+check("the held line names the key in dispute",
+  (lastWarn or ""):find("red/now%-playing") ~= nil)
+check("and this device's stamp", (lastWarn or ""):find("21:42") ~= nil)
+check("and the other device's", (lastWarn or ""):find("21:37") ~= nil)
+check("and not the row that is none of our business",
+  (lastWarn or ""):find("some%-other%-run") == nil)
+check("and it is still holding the file", writes == before)
+syncState.phase = "idle"
+syncState.conflicts = nil
+syncState.protectedKey = nil
+run(30)
+check("and still resumes after that one clears", writes == before + 1)
 
 -- 6c. Events are floored by MIN_GAP and nothing else.  There was a second and
 -- longer floor between two EVENT saves, which held a row of doors to one save
