@@ -86,6 +86,7 @@ does not land on top of a save you just made yourself.
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
 | `ON QUIT` | on | Offer the save in the QUIT confirm, and wait for it. |
 | `HEAL CONFLICTS` | on | Answer a "conflict" that is really your own lost upload. |
+| `QUIET SYNC` | on | Keep a sync cycle out of the frames you are mid-step in. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
@@ -226,6 +227,33 @@ A sync cycle leaves the same debt, more of it: planning decoded every slot into
 a full table again, a character at a time. So the same catch-up runs in the
 frame a cycle finishes on — every cycle, not only the ones an autosave woke,
 since after the pacing above most of them are the engine's own sweep.
+
+### And where the last of it lands
+
+Pacing chose how *often* a cycle runs. It could not choose *when* the expensive
+part of one happens, and that is the half you actually feel. The plan is built
+against the server's **reply**, not against the request: the engine polls the
+handle each frame, and the frame the answer arrives on is the frame that
+decodes every slot. So the stall lands on network time — a moment set by
+latency and the server, with no relation to anything you did. That is exactly
+why it reads as the game hiccupping rather than as the game syncing: nothing on
+screen caused it, and nothing on screen explains it. The engine's own five
+minute sweep lands the same way, and the pacing above never touched that one.
+
+That work cannot be made cheap from here. It can be made to land where it does
+not show. A frame dropped while you are standing still, in a menu, reading a
+box or in a battle is a frame nobody sees; the same frame dropped mid-step is a
+visible stutter, because the walk cycle and the camera are both part-way
+between tiles and both jump when one frame is worth two.
+
+So `QUIET SYNC` holds a cycle that has a reply in hand out of the frames you
+are mid-step in, and runs it on the first frame you are not — a fraction of a
+second later, because a step is a fraction of a second. Any menu, text box,
+battle, doorway or pause releases it immediately. Only when a reply is actually
+in flight: the cheap tick that *starts* a cycle is never held, since holding it
+would stop the engine's clock for no reason. And the hold is capped at three
+seconds, so holding a direction across Route 21 cannot starve sync — after that
+the cycle runs wherever it lands, the way it always did.
 
 ## Backups
 

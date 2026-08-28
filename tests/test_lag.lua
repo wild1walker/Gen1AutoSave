@@ -248,3 +248,75 @@ run(1)
 check("disabled writes nothing", writes == beforeOff)
 check("disabled collects nothing", gcSteps == 0)
 check("disabled leaves the upload alone", syncState.uploadAt == 500)
+
+-- ---------- 7. QUIET SYNC: the stall lands where a dropped frame does not show
+--
+-- The expensive part of a cycle is the plan, and the plan runs on the frame
+-- the SERVER'S REPLY lands (SyncEngine:update -> client:poll -> _planFrom).
+-- Nothing the mod does can make that cheaper or predict when it arrives, so
+-- what it does instead is keep it out of the frames a dropped frame shows in.
+-- Mid-step is the only one of those: the walk cycle and the camera are both
+-- part-way between tiles.
+--
+-- The engine ticks itself in the host, so the suite ticks it here -- through
+-- the same instance the mod wrapped, which is what makes the hold visible.
+
+opts.enabled = true
+local ticked = 0
+syncState.update = function() ticked = ticked + 1 end
+syncState.pending = { handle = 1 }
+
+player.moving = false
+run(1 / 60)                          -- one frame to install the hold
+
+local function tick(dt)
+  local engine = game.syncEngine()
+  engine.update(engine, dt or 1 / 60)
+end
+
+ticked = 0
+tick()
+check("a settled frame ticks the sync engine", ticked == 1)
+
+player.moving = true
+ticked = 0
+for _ = 1, 10 do tick() end
+check("a mid-step frame holds the cycle instead", ticked == 0)
+
+player.moving = false
+tick()
+check("and the step ending releases it at once", ticked == 1)
+
+-- A player holding a direction across a long route must not starve sync: the
+-- hold is capped, and one tick is all a pending reply needs to be dealt with.
+player.moving = true
+ticked = 0
+for _ = 1, 60 * 5 do tick() end
+check("a long walk stops holding once the cap is spent", ticked > 0)
+
+-- A tick with nothing in flight is the cheap one that STARTS a cycle. Holding
+-- that would stop the engine's clock for no reason at all.
+syncState.pending = nil
+player.moving = true
+ticked = 0
+tick()
+check("a tick with no reply in flight is never held", ticked == 1)
+
+-- and the row turns it all the way off
+syncState.pending = { handle = 1 }
+opts.quiet_sync = false
+player.moving = true
+ticked = 0
+tick()
+check("QUIET SYNC off hands every frame straight through", ticked == 1)
+opts.quiet_sync = true
+
+-- as does switching the mod off, which must not leave sync held by a mod
+-- that is no longer doing anything
+opts.enabled = false
+player.moving = true
+ticked = 0
+tick()
+check("disabled holds nothing", ticked == 1)
+opts.enabled = true
+player.moving = false
