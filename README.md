@@ -400,8 +400,41 @@ There are three, and they are named.
 | Window | Why |
 | --- | --- |
 | A warp, FLY or TELEPORT | The screen is going black, and the write goes at the **start** of that fade rather than the end of it — see below. A route seam is **not** one of these — see above |
-| A battle starting, and a battle ending | Behind the intro, and in the return hold before the fade back |
+| A battle **ending** | In the hold at the front of the return transition, where the screen is a solid colour and the fade back has not started stepping. A battle *starting* is **not** one — see below |
 | Standing still | A *real* stop, not a pause — and the moment a menu, a conversation or a battle hands control back counts as one |
+
+#### Going into a battle is not a window either
+
+The intro wipe is as blacked-out a screen as the game has, and on this path's
+own reasoning it qualified. It shipped that way, and it was wrong.
+
+It is the only covered screen in the game the player is watching for a *cue*
+rather than waiting out. The wipe closes and the very next thing that happens
+is a menu they are already reaching for — on the most frequent transition in
+the game. A hitch there is not a longer loading screen, it is the battle being
+slow to start, every single encounter.
+
+Nothing is lost by dropping it. The state it wrote was the overworld the
+battle started from; the end of the same battle, seconds later, writes that
+same route with the outcome in it as well, behind a screen nobody is waiting
+on.
+
+#### And the end of one goes a frame later than it used to
+
+`battle.ended` fires in a gap. `BattleState:finish` pops the battle screen,
+emits, and only *then* pushes the return transition — so on that one frame
+nothing is covering anything. A write taken there is a freeze between the last
+battle frame and the first frame of the fade, and what you see is the fade
+appearing late, or appearing already part-way down.
+
+The transition that follows opens with a **hold**: ten frames at full opacity
+before `GBFadeInFromWhite` starts stepping the palette. That is the frame to
+spend. The hitch lands on a screen that is not moving and cannot move, and
+every step of the fade plays *after* it — the same trade the warp fade makes.
+
+So `battle.ended` only arms the write, and the next fully-covered frame takes
+it. A transition this does not recognise means no window, not no save: the
+save is still due and the next screen it does know takes it instead.
 
 #### A menu is not a window
 
