@@ -38,7 +38,13 @@ local mod = {
 }
 
 local player = { moving = false }
-local ow = { player = player, scriptMoves = {}, runner = nil }
+-- A held direction, which is what the engine's OverworldState:dirHeld answers.
+-- It matters here as much as it does to the write: `moving` is false for the
+-- single frame between two strides, so a player who never stops walking offers
+-- an opening several times a second, and that frame is the stutter.
+local held = false
+local ow = { player = player, scriptMoves = {}, runner = nil,
+             dirHeld = function() return held end }
 local syncState = { busy = false, phase = "idle", uploadAt = nil }
 local screens, returned = {}, 0
 local noEngine = false
@@ -228,6 +234,28 @@ gcSteps = 0
 run(5)
 check("and settled once, not once a frame after", gcSteps == 0)
 
+-- 5b. and not into a walk either
+--
+-- The plan is held out of the frames a dropped frame shows in, but the
+-- transfer that follows it finishes on network time and answers to nothing.
+-- Twelve collector steps landing in the middle of a stride is the same stutter
+-- by another route, so the debt is remembered and paid on the first frame that
+-- is not a moving screen.
+
+held = true
+gcSteps = 0
+syncState.busy = true
+run(1)
+syncState.busy = false               -- the cycle finished, mid-walk
+run(2)
+check("a cycle finishing mid-walk collects nothing there", gcSteps == 0)
+held = false
+run(1 / 60)
+check("and the debt is paid on the first still frame", gcSteps == 1)
+gcSteps = 0
+run(5)
+check("once, and not again", gcSteps == 0)
+
 -- a host with no sync engine at all is not a crash, and has no cycle to watch
 noEngine = true
 gcSteps = 0
@@ -291,12 +319,44 @@ player.moving = false
 tick()
 check("and the step ending releases it at once", ticked == 1)
 
--- A player holding a direction across a long route must not starve sync: the
--- hold is capped, and one tick is all a pending reply needs to be dealt with.
+-- The frame between two strides is not an opening.  `moving` is false on it,
+-- which is what this test used to pass on, so the plan was released into the
+-- exact frame the hold exists to protect -- several times a second, for as
+-- long as the player kept walking.
+player.moving = false
+held = true
+ticked = 0
+for _ = 1, 60 do tick() end
+check("the gap between two strides does not release the plan", ticked == 0)
+
+-- And there is no cap.  There was one -- three seconds -- which counted to
+-- three without checking that the player had stopped and then ran the plan
+-- wherever it landed.  Holding costs nothing but time: the reply is in hand,
+-- the engine's clock stops with the hold, and letting go of the pad releases
+-- it on the next frame.
 player.moving = true
 ticked = 0
-for _ = 1, 60 * 5 do tick() end
-check("a long walk stops holding once the cap is spent", ticked > 0)
+for _ = 1, 60 * 60 do tick() end
+check("a minute of walking never forces the plan through", ticked == 0)
+
+held = false
+player.moving = false
+tick()
+check("and letting go of the pad releases it at once", ticked == 1)
+
+-- Any menu, text box, battle or doorway releases it too: all of them take the
+-- overworld off the top of the stack, and none of them is a frame a dropped
+-- frame shows in.
+player.moving = true
+held = true
+screens[#screens + 1] = { menu = true }
+ticked = 0
+tick()
+check("a screen over the overworld releases it however the pad is held",
+      ticked == 1)
+table.remove(screens)
+held = false
+player.moving = false
 
 -- A tick with nothing in flight is the cheap one that STARTS a cycle. Holding
 -- that would stop the engine's clock for no reason at all.

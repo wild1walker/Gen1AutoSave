@@ -87,7 +87,7 @@ does not land on top of a save you just made yourself.
 | `ON QUIT` | on | Offer the save in the QUIT confirm, and wait for it. |
 | `HEAL CONFLICTS` | on | Answer a "conflict" that is really your own lost upload. |
 | `SAVE ON LOADS` | on | Save on the black screen a warp or a battle already puts up. |
-| `QUIET SYNC` | on | Keep a sync cycle out of the frames you are mid-step in. |
+| `QUIET SYNC` | on | Keep a sync cycle out of the frames you are walking through. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
@@ -288,14 +288,34 @@ box or in a battle is a frame nobody sees; the same frame dropped mid-step is a
 visible stutter, because the walk cycle and the camera are both part-way
 between tiles and both jump when one frame is worth two.
 
-So `QUIET SYNC` holds a cycle that has a reply in hand out of the frames you
-are mid-step in, and runs it on the first frame you are not — a fraction of a
-second later, because a step is a fraction of a second. Any menu, text box,
-battle, doorway or pause releases it immediately. Only when a reply is actually
-in flight: the cheap tick that *starts* a cycle is never held, since holding it
-would stop the engine's clock for no reason. And the hold is capped at three
-seconds, so holding a direction across Route 21 cannot starve sync — after that
-the cycle runs wherever it lands, the way it always did.
+So `QUIET SYNC` holds a cycle that has a reply in hand out of the frames you are
+walking through, and runs it on the first frame you are not. Any menu, text box,
+battle, doorway or pause releases it immediately — all of them take the
+overworld off the top of the stack, and none of them is a frame a dropped frame
+shows in. Only when a reply is actually in flight: the cheap tick that *starts*
+a cycle is never held, since holding it would stop the engine's clock for no
+reason.
+
+"Walking" is the same question `SAVE ON LOADS` asks, and it has to be asked the
+same way. This used to read the player's `moving` flag alone, which drops for
+the single frame between two strides — so someone walking a long route without
+stopping offered the hold an opening several times a second, and the plan took
+it, landing in the exact frame the hold exists to protect. A held direction
+counts as walking now.
+
+There is no cap on the hold either. There was one — three seconds, so that
+holding a direction across Route 21 could not starve sync — and it did not check
+that you had stopped: it counted to three and ran the plan wherever it landed.
+Between the two, the stall a moment after every save was not an edge case, it
+was the ordinary path. Holding costs nothing but time: the reply is already in
+hand, the engine's own clock stops with the hold so nothing fires early to make
+the time back, and letting go of the pad releases it on the next frame.
+
+The debt a finished cycle leaves behind waits for the same kind of frame. The
+plan is kept out of a walk, but the transfer that follows it completes on
+network time and answers to nothing, and a burst of collector steps landing in
+the middle of a stride is the same stutter by another route. So it is
+remembered and paid on the first frame that is not a moving screen.
 
 ## Backups
 
