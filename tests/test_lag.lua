@@ -98,16 +98,34 @@ local function check(label, cond)
 end
 
 local UPLOAD_GAP = 300
-local GC_STEPS = 12
+
+-- The most allocation credit the nudge after a write may ask the collector
+-- for, in KB, over all of its steps.
+--
+-- This is the assertion that matters, not the step count.  `collectgarbage
+-- ("step", n)` asks the collector to work as if n KB had been allocated, so
+-- steps x size is a budget -- and a budget the size of the heap is a COMPLETE
+-- collection cycle, in one frame, after every single save.  This was 12 x
+-- 4096, which is 48 MB of credit: a full cycle on any heap a Game Boy game
+-- has, and measured at 53 ms in the frame the save landed in against 10 ms
+-- for the nudge that replaced it.
+--
+-- One encode of a 182 KB save allocates about 2.8 MB, and the engine already
+-- steps the collector on every rendered frame of its own accord
+-- (Game:update, collectgarbage("step", 1)).  So the ceiling here is a nudge,
+-- not a cycle.  If a future edit puts the burst back, this fails.
+local GC_BUDGET_KB = 2048
 
 -- The collector, watched.  The mod looks `collectgarbage` up as a global at
--- call time, so swapping it here is enough to see every step it asks for.
+-- call time, so swapping it here is enough to see every step it asks for --
+-- and how big each one was.
 local realGC = collectgarbage
-local gcSteps, gcFinishAfter, gcBoom = 0, 1, false
+local gcSteps, gcCredit, gcFinishAfter, gcBoom = 0, 0, 1, false
 collectgarbage = function(what, arg)
   if what ~= "step" then return realGC(what, arg) end
   if gcBoom then error("collector said no") end
   gcSteps = gcSteps + 1
+  gcCredit = gcCredit + (tonumber(arg) or 0)
   return gcFinishAfter ~= nil and gcSteps >= gcFinishAfter
 end
 
@@ -139,12 +157,15 @@ gcSteps = 0
 run(400)
 check("a skipped save writes nothing", gcSteps == 0)
 
--- a collector that never reports a finished cycle is still bounded: a large
--- heap on a phone must not turn one hitch into a freeze
+-- a collector that never reports a finished cycle is still bounded, and
+-- bounded SMALL: a large heap on a phone must not turn one hitch into a
+-- freeze, and asking for a heap's worth of credit is exactly that
 gcFinishAfter = nil
-gcSteps = 0
+gcSteps, gcCredit = 0, 0
 check("a second autosave lands", save())
-check("the catch-up is bounded when no cycle finishes", gcSteps == GC_STEPS)
+check("the catch-up is bounded when no cycle finishes", gcSteps <= 4)
+check("and asks for a nudge rather than a whole cycle",
+      gcCredit > 0 and gcCredit <= GC_BUDGET_KB)
 
 -- a step that raises must not cost the save or crash the frame
 gcBoom = true
