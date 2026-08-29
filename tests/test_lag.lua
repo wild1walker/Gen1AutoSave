@@ -394,10 +394,25 @@ local ticked = 0
 -- captures, and reassigning syncState.update later would throw the wrapper
 -- away and test nothing.  `consumeReply` is how a later block makes the inner
 -- update clear the pending reply, which is what a real plan does.
-local consumeReply = false
+-- `expensiveReply` makes the inner update burn real time, which is what the
+-- mod now measures: a plan that decodes every save slot is not detectable by
+-- watching `pending` (the task loop re-arms it inside the same call), so the
+-- test has to cost something for the check to have anything to see.
+local expensiveReply = false
 syncState.update = function()
   ticked = ticked + 1
-  if consumeReply then syncState.pending = nil end
+  if expensiveReply then
+    local until_ = os.clock() + 0.02
+    while os.clock() < until_ do end
+    -- Faithful to SyncEngine:update: the reply is consumed and _planFrom runs
+    -- -- and then the task loop at the end of the SAME call starts the first
+    -- upload it decided on, which arms `pending` again.  So pending goes
+    -- non-nil -> nil -> non-nil inside one call, and a before/after look at it
+    -- sees nothing happen.  A stub that only cleared it made the old,
+    -- never-firing check look correct.
+    syncState.pending = nil
+    syncState.pending = { handle = 2 }
+  end
 end
 syncState.pending = { handle = 1 }
 
@@ -504,19 +519,33 @@ syncState.pending = { handle = 1 }
 held = false
 player.moving = false
 run(4)                               -- a real stop: a quiet frame to run in
-consumeReply = true
+expensiveReply = true
 catchupDiscards = 0
 ticked = 0
 tick()
 check("the plan runs on a quiet frame", ticked == 1)
 check("and absorbs the frame it cost", catchupDiscards == 1)
 
--- a tick that consumes nothing arms nothing
-consumeReply = false
-syncState.pending = nil
+-- a tick that cost nothing arms nothing: the clamp is for hitches, and
+-- arming it on every poll would throw away catch-up the engine is owed
+expensiveReply = false
+syncState.pending = { handle = 1 }
 catchupDiscards = 0
 tick()
-check("a tick with no reply to consume arms nothing", catchupDiscards == 0)
+check("a cheap tick arms nothing", catchupDiscards == 0)
+
+-- ...and a fade is NOT a quiet frame.  The warp fade is thirty-two logic
+-- steps of animation; a plan landing in the middle of one is a stall you can
+-- see, and the burst afterwards runs the rest of the fade before the next
+-- draw.  Walking through a door came out as a pop.
+ow.transitioning = true
+syncState.pending = { handle = 1 }
+ticked = 0
+tick()
+check("the plan is held through a warp fade", ticked == 0)
+ow.transitioning = nil
+tick()
+check("and runs once the fade is over", ticked == 1)
 
 -- and the row turns it all the way off
 syncState.pending = { handle = 1 }
