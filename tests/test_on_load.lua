@@ -103,6 +103,35 @@ local function check(label, cond)
   print((cond and "PASS  " or "FAIL  ") .. label)
 end
 
+-- The post-battle return, as much of it as this path reads.  BattleState:
+-- finish pops the battle, emits battle.ended, and only THEN pushes this
+-- (src/battle/BattleState.lua) -- so the event fires on a frame with nothing
+-- covering anything, and the screen is not solid until this arrives.  It
+-- opens with POST_BATTLE_RETURN frames at alpha 1 and then steps the fade
+-- (Transition.BattleReturn), which is the window and the thing the window
+-- exists to keep the write out of, in that order.
+local RETURN_HOLD, RETURN_FADE = 10, 24
+local function pushReturn()
+  local t = { t = 0 }
+  function t:alpha()
+    if self.t < RETURN_HOLD then return 1 end
+    return math.max(0, 1 - (self.t - RETURN_HOLD) / RETURN_FADE)
+  end
+  screens[#screens + 1] = t
+  return t
+end
+
+-- What a battle actually looks like on the way out: the event, then the
+-- return transition on the next frame, then the fade -- and then the
+-- transition pops itself and hands the map back, which is what leaves the
+-- stack as this found it.
+local function endBattle()
+  emit("battle.ended")
+  pushReturn()
+  run(1 / 60)
+  table.remove(screens)
+end
+
 -- one frame, so the mod has a game handle before any event fires
 run(1 / 60)
 
@@ -124,7 +153,27 @@ emit("pokemon.evolved")
 run(5)
 check("the next due save also waits", writes == before)
 emit("battle.ended")
-check("the end of a battle writes it", writes == before + 1)
+check("the event alone is not the window: nothing is covering yet", writes == before)
+local ret = pushReturn()
+run(1 / 60)
+check("the return transition's hold is, and it writes there", writes == before + 1)
+table.remove(screens)
+
+-- and it goes in the HOLD, not once the fade has started stepping: the whole
+-- point is that every frame of the fade plays after the hitch
+run(25)
+before = writes
+emit("pokemon.evolved")
+run(1)
+emit("battle.ended")
+ret = pushReturn()
+ret.t = RETURN_HOLD + 4          -- the fade is already part-way down
+run(1 / 60)
+check("a fade already stepping is not the window", writes == before)
+ret.t = 0                        -- a fresh hold, solid again
+run(1 / 60)
+check("the next solid frame takes it", writes == before + 1)
+table.remove(screens)
 
 -- ---------- 3. waiting is not on a clock
 --
@@ -302,15 +351,25 @@ run(1)
 check("closing it hands the save back", writes == before + 1)
 held = true
 
--- and the start of a battle, behind its own intro
+-- and the start of a battle is NOT a window, however covered its intro is.
+--
+-- It used to be.  The wipe is as blacked-out a screen as the game has, so on
+-- this path's own reasoning it qualified -- but it is the only covered screen
+-- the player is watching for a cue rather than waiting out: it opens onto a
+-- menu they are already reaching for, on the most frequent transition in the
+-- game.  Reported as stuttering going into battles.  The end of the same
+-- battle writes the same route with the outcome in it as well, seconds later,
+-- behind a screen nobody is waiting on.
 run(25)
 before = writes
 emit("pokemon.caught")
 run(2)
 check("walking, still waiting", writes == before)
 emit("battle.started")
-check("a battle starting writes it behind the intro", writes == before + 1)
-emit("battle.ended")
+run(2)
+check("a battle starting writes nothing", writes == before)
+endBattle()
+check("the end of that battle is what writes it", writes == before + 1)
 
 -- ---------- 9. and never inside the battle itself
 --
@@ -328,8 +387,17 @@ emit("pokemon.caught")
 screens[#screens + 1] = { battle = true }
 run(30)
 check("nothing is written inside a battle", writes == before)
+
+-- not even behind the battle's own covered screens, which answer the same
+-- "the screen is solid" question the return transition does.  An arm left
+-- over from the battle before this one is the way that could have happened.
+pushReturn()
+run(30)
+check("nor behind a veil inside one", writes == before)
 table.remove(screens)
-emit("battle.ended")
+
+table.remove(screens)
+endBattle()
 check("the end of it writes", writes == before + 1)
 
 -- ---------- 10. a route seam is not a door
