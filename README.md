@@ -89,7 +89,7 @@ does not land on top of a save you just made yourself.
 | `SAVE ON LOADS` | on | Save in a moment you could not move in: a door, a battle, a menu. |
 | `QUIET SYNC` | on | Keep a sync cycle out of the frames you are walking through. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
-| `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
+| `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. Roughly triples what a save costs — see below. |
 | `BACKUPS KEPT` | 5 | Ring size: 3, 5, 10 or 20. |
 
 If autosaving goes quiet, look for the held badge in place of the usual save
@@ -203,31 +203,52 @@ directly. The work is in *not* writing at the wrong moments.
 
 ## The frame after a save
 
-The lag around an autosave is mostly not the write. It is the collection of
-what the write threw away, and it lands a beat later — which is why it reads as
-the game stuttering rather than as the game saving.
+### What a save actually costs
 
-A save copies the progress table, serializes the copy into one large string,
-reads the previous file back to make the `.bak`, writes that string twice more
-and rewrites `options.lua` beside it — and with backups on, deep-copies the
-save twice more and serializes that too. Megabytes of short-lived strings, in
-one frame. The engine's collector budget is one small step per rendered frame,
-sized (by its own comment) for "ordinary Lua-heap garbage — per-frame tables
-and closures". A save is a year of that at once, so the collector falls behind,
-and the part of a cycle that cannot be split surfaces a second or two later, in
-a frame that is just ordinary walking.
+Measured on a 45 MB heap under LuaJIT, with a 182 KB save file:
 
-So the mod finishes the cycle itself, in the frame that already stopped to
-touch the disk and is showing you a Poke Ball while it does. The work is the
-same work; paying for it at the save spends a frame you have been told to
-expect instead of a slow patch of route afterwards you have not. It is bounded
-— a fixed number of steps, stopping the moment the cycle completes — so a large
-heap on a phone cannot turn one hitch into a freeze.
+| | |
+| --- | --- |
+| `SaveSerializer.encode` (the engine's, unavoidable) | **9.6 ms** |
+| the file writes (`.bak` read, then three writes of the blob) | under 1 ms on a desktop; a phone's flash is slower |
+| `SAVE BACKUPS` on: two deep copies plus a second serialize | **+16 ms** |
 
-A sync cycle leaves the same debt, more of it: planning decoded every slot into
-a full table again, a character at a time. So the same catch-up runs in the
-frame a cycle finishes on — every cycle, not only the ones an autosave woke,
-since after the pacing above most of them are the engine's own sweep.
+So a plain autosave is about ten milliseconds of real work, and the mod's job is
+to put it where nobody is looking — which is what the windows below are for.
+
+### The collector, and a mistake this mod made for a long time
+
+One encode allocates about **2.8 MB** of short-lived strings and tables. That is
+a lot for one frame, and the temptation is to pay it off immediately.
+
+This mod used to do that with 12 collector steps of 4096 KB each. Up to 48 MB of
+allocation credit — which on any heap a Game Boy game has is not a nudge, it is
+a **complete collection cycle, in one frame, after every single save**. Measured
+over 30 save cycles with twenty seconds of ordinary frames between them, the
+median frame a save landed in:
+
+| | save frame |
+| --- | --- |
+| 12 × step 4096 — what this used to do | **53.0 ms** |
+| no nudge at all | 14.3 ms |
+| 2 × step 512 — what it does now | **10.5 ms** |
+
+And it bought almost nothing. The worst frame in the twenty seconds *after* a
+save is 4.1 ms with the old burst, 5.9 ms with the small nudge, 10.2 ms with no
+nudge at all. The burst was spending forty milliseconds a save to move at most
+six milliseconds off some later frame. On a phone every one of those numbers is
+three to five times larger, and that was the stutter.
+
+The reason a small nudge is enough is that **the engine is already doing this**.
+`Game:update` ends on `collectgarbage("step", 1)` every rendered frame, and its
+own comment says why: to spread collection out "so the default lazy schedule
+never batches it into a visible pause". The collector was never falling behind.
+What it needed was a little extra credit for the one frame that allocated far
+more than a frame usually does — 2 × 512 KB, stopping early if the cycle
+finishes — and nothing more.
+
+A sync cycle leaves a bigger debt, since planning decodes every slot into a full
+table again. It gets the same small nudge, on a frame the screen is not moving.
 
 ### Saving on a screen you cannot see
 
