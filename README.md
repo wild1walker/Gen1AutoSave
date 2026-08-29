@@ -86,7 +86,7 @@ does not land on top of a save you just made yourself.
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
 | `ON QUIT` | on | Offer the save in the QUIT confirm, and wait for it. |
 | `HEAL CONFLICTS` | on | Answer a "conflict" that is really your own lost upload. |
-| `SAVE ON LOADS` | on | Write during a screen a warp or a battle already blacks out. |
+| `SAVE ON LOADS` | on | Save on the black screen a warp or a battle already puts up. |
 | `QUIET SYNC` | on | Keep a sync cycle out of the frames you are mid-step in. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
@@ -247,13 +247,28 @@ you just left and the spot you left it from. Entered fires once the new map, you
 cell and your facing are all in place, with the transition still up — coherent
 state, screen still covered.
 
-Waiting is not forever. A save that has not found a screen within about
-three quarters of a minute is written on the route as before, because a player
-who has not changed maps or fought anything in that long is standing somewhere
-quiet, and a save on the route beats no save. Every other rule still applies on a
-loading screen: the floor between writes, a live sync transfer, an unresolved
-conflict and a player still mid-step all refuse it exactly as they would anywhere
-else.
+Waiting is not on a clock. There used to be a 45-second cap here, on the
+reasoning that a player who had not warped or fought in that long was standing
+somewhere quiet and a save on the route beat no save. It did not check that they
+had *stopped*, so what it actually did was give up and write into a stride —
+the one frame this whole path exists to avoid, arriving reliably rather than by
+accident.
+
+A due save now waits for as long as the walking lasts, and leaves by one of
+three doors: a warp, the end of a battle, or **you standing still**. There is no
+fourth.
+
+That third door is why the wait is safe to leave open. "Standing still" is not
+`moving == false`: that flag drops for the single frame between two strides, so
+somebody walking a long route without stopping satisfies it several times a
+second, and that gap is precisely where a dropped frame is seen — the screen is
+scrolling on both sides of it. A held direction says the next stride begins on
+the next frame, so it is not idle and nothing is written into it. Let go of the
+pad and the save lands on the next frame.
+
+Every other rule still applies on a loading screen: the floor between writes, a
+live sync transfer, an unresolved conflict and a player still mid-step all
+refuse it exactly as they would anywhere else.
 
 ### And where the last of it lands
 

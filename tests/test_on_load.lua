@@ -37,8 +37,16 @@ local mod = {
   },
 }
 
+-- The player is WALKING for most of this suite, because that is the state the
+-- whole path exists for.  `moving` is deliberately false alongside it: that is
+-- the one frame between two strides, and it is where the hitch this mod was
+-- reported for used to land.  A held direction is what tells the mod the next
+-- stride starts on the next frame; the engine answers it with
+-- OverworldState:dirHeld, and so does this.
 local player = { moving = false }
-local ow = { player = player, scriptMoves = {}, runner = nil }
+local held = true
+local ow = { player = player, scriptMoves = {}, runner = nil,
+             dirHeld = function() return held end }
 local syncState = { busy = false, phase = "idle", uploadAt = nil }
 local screens, returned = {}, 0
 local noEngine = false
@@ -116,18 +124,46 @@ check("the next due save also waits", writes == before)
 emit("battle.ended")
 check("the end of a battle writes it", writes == before + 1)
 
--- ---------- 3. but waiting is not forever
+-- ---------- 3. waiting is not on a clock
 --
--- A player who has not changed maps or fought anything in three quarters of a
--- minute is standing somewhere quiet.  A save on the route beats no save.
+-- There was a 45-second cap here, on the reasoning that a player who had not
+-- warped or fought in that long was standing somewhere quiet and a save on the
+-- route beat no save.  It did not check that they had stopped, so what it
+-- actually did was give up and write into a stride -- the one frame this path
+-- exists to avoid, arriving reliably rather than by accident.
+--
+-- A due save now waits for as long as the walking lasts.  It leaves by one of
+-- three doors and there is no fourth: a warp, the end of a battle, or the
+-- player stopping.
 
 run(25)
 before = writes
 emit("pokemon.caught")
-run(30)
-check("still holding out for a screen at 30s", writes == before)
-run(20)
-check("past LOAD_WAIT it gives up and writes on the route", writes == before + 1)
+run(60)
+check("a minute of walking and it is still holding out", writes == before)
+run(60)
+check("two minutes, and still no frame spent on a moving screen",
+      writes == before)
+
+-- The third door: not a warp and not a battle, just letting go of the pad.
+held = false
+run(1)
+check("the moment the player stands still, it writes", writes == before + 1)
+held = true
+
+-- And the frame between two strides is not standing still.  `moving` is false
+-- on it -- which is what the old test was really passing on -- so this is the
+-- assertion that fails if that check ever goes back to reading `moving` alone.
+run(25)
+before = writes
+emit("pokemon.caught")
+player.moving = false
+run(5)
+check("the gap between two strides is not an opening", writes == before)
+held = false
+run(1)
+check("but a real stop is", writes == before + 1)
+held = true
 
 -- ---------- 4. the gates still apply on a loading screen
 
@@ -188,7 +224,12 @@ emit("pokemon.caught")
 emit("map.entered")
 check("SAVE ON LOADS off writes nothing on the screen", writes == before)
 run(2)
-check("and hands the save straight back to the route", writes == before + 1)
+check("and does not write into the walk either", writes == before)
+held = false
+run(2)
+check("but hands the save back to the route once the player stops",
+      writes == before + 1)
+held = true
 opts.on_load = true
 
 print(string.format("\n%d/%d checks passed  (gen1autosave on-load)",
