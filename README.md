@@ -395,25 +395,42 @@ accident.
 
 #### The windows
 
-A warp and the end of a battle are two of them, and they were the only two for
-a while, which made a due save wait longer than it had to. The real rule is
-wider: **any moment you could not move if you wanted to** is a moment worth
-spending a frame in, and the game gives you a lot of them.
+There are three, and they are named.
 
 | Window | Why |
 | --- | --- |
 | A warp, FLY or TELEPORT | The screen is going black, and the write goes at the **start** of that fade rather than the end of it — see below. A route seam is **not** one of these — see above |
-| A battle starting | Behind its own intro, and the save is of the overworld you left |
-| A battle ending | The return hold, before the fade back |
-| A text box, while an NPC talks | You are being held still by the conversation |
-| The START menu, the bag, the party, a PC, a mart, a Center's heal | Same — anything over the overworld |
-| Standing still | A *real* stop, not a pause |
+| A battle starting, and a battle ending | Behind the intro, and in the return hold before the fade back |
+| Standing still | A *real* stop, not a pause — and the moment a menu, a conversation or a battle hands control back counts as one |
 
-Nothing here is a list of named events. Something over the overworld is
-something holding you still, so the stack answers all of the middle rows at
-once — including the ones this table does not name.
+#### A menu is not a window
 
-Two of them are held back on purpose. **Inside** a battle nothing is written:
+There used to be a fourth, and it was the widest of them: **anything over the
+overworld**. A text box while somebody talks, the START menu, the bag, the
+party, a PC, a mart, a Centre's heal. The reasoning was that you could not move
+if you wanted to and the map behind is a still picture, so a dropped frame
+there is a frame nobody sees.
+
+Nobody sees it. You feel it. A menu is not a pause in the playing — it is the
+part of the playing with the most presses per second in it: choosing an item,
+swapping two moves, walking a cursor down a box list. A frame lost there is an
+*input* lost there, and that is worse than a frame lost on a route. A stutter
+mid-stride is ugly; a swallowed A press is the game not listening.
+
+"Is the screen moving" was the wrong question. The right one is whether you are
+in the middle of doing something, and in a menu you always are.
+
+So a screen over the overworld is a **refusal** now, not a window. The moment
+one *closes* is still a window — that is the settle grace, and by then the menu
+is gone and you are standing on the route with nothing pressed. Closing is the
+moment, not opening.
+
+A write that genuinely wants to go under a screen still can: a warp's black
+screen and a battle's return hold are not screens you can press through, and
+they come through their own path, which names its moments rather than taking
+every screen there is.
+
+Two more are held back on purpose. **Inside** a battle nothing is written:
 Gen 1 has no save there and neither has this, because the file would record the
 overworld the fight started from while you are somewhere else entirely. And
 **part-way through a script** nothing is written either — a script that has set
