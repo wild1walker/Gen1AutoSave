@@ -250,8 +250,10 @@ syncState.busy = false               -- the cycle finished, mid-walk
 run(2)
 check("a cycle finishing mid-walk collects nothing there", gcSteps == 0)
 held = false
-run(1 / 60)
-check("and the debt is paid on the first still frame", gcSteps == 1)
+run(1)
+check("and a one second pause is not a still frame", gcSteps == 0)
+run(3)
+check("and the debt is paid once the player really has stopped", gcSteps == 1)
 gcSteps = 0
 run(5)
 check("once, and not again", gcSteps == 0)
@@ -316,8 +318,9 @@ for _ = 1, 10 do tick() end
 check("a mid-step frame holds the cycle instead", ticked == 0)
 
 player.moving = false
+run(4)                               -- a real stop, not a gap between strides
 tick()
-check("and the step ending releases it at once", ticked == 1)
+check("and the player stopping releases it", ticked == 1)
 
 -- The frame between two strides is not an opening.  `moving` is false on it,
 -- which is what this test used to pass on, so the plan was released into the
@@ -325,6 +328,7 @@ check("and the step ending releases it at once", ticked == 1)
 -- long as the player kept walking.
 player.moving = false
 held = true
+run(1)                               -- a held direction: the stop clock resets
 ticked = 0
 for _ = 1, 60 do tick() end
 check("the gap between two strides does not release the plan", ticked == 0)
@@ -335,25 +339,50 @@ check("the gap between two strides does not release the plan", ticked == 0)
 -- the engine's clock stops with the hold, and letting go of the pad releases
 -- it on the next frame.
 player.moving = true
+run(60)
 ticked = 0
 for _ = 1, 60 * 60 do tick() end
 check("a minute of walking never forces the plan through", ticked == 0)
 
+-- Letting go of the pad is not a stop.  run() rather than tick() from here,
+-- because the stillness clock is kept by the mod's own update and a bare tick
+-- of the sync engine does not advance it.
 held = false
 player.moving = false
+ticked = 0
+run(1)
 tick()
-check("and letting go of the pad releases it at once", ticked == 1)
+check("a one second pause does not release it", ticked == 0)
+run(3)
+tick()
+check("standing still for a few seconds does", ticked == 1)
 
 -- Any menu, text box, battle or doorway releases it too: all of them take the
 -- overworld off the top of the stack, and none of them is a frame a dropped
--- frame shows in.
+-- frame shows in.  This is the other half of what the save asked for: the
+-- write goes down at the door, and the cycle it woke takes the NEXT window --
+-- a conversation, a menu, the next battle -- rather than waiting on the same
+-- one.
 player.moving = true
 held = true
 screens[#screens + 1] = { menu = true }
+run(1 / 30)
 ticked = 0
 tick()
 check("a screen over the overworld releases it however the pad is held",
       ticked == 1)
+table.remove(screens)
+
+-- And a battle, which is a fine frame to spend even though it is not one to
+-- write a save in.
+screens[#screens + 1] = { battle = true }
+emit("battle.started")
+run(1 / 30)
+ticked = 0
+tick()
+check("and so does a battle, which the write itself is barred from",
+      ticked == 1)
+emit("battle.ended")
 table.remove(screens)
 held = false
 player.moving = false

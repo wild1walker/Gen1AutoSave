@@ -45,7 +45,9 @@ local mod = {
 -- OverworldState:dirHeld, and so does this.
 local player = { moving = false }
 local held = true
-local ow = { player = player, scriptMoves = {}, runner = nil,
+local scripting = false
+local ow = { player = player, scriptMoves = {},
+             runner = { isRunning = function() return scripting end },
              dirHeld = function() return held end }
 local syncState = { busy = false, phase = "idle", uploadAt = nil }
 local screens, returned = {}, 0
@@ -145,10 +147,14 @@ run(60)
 check("two minutes, and still no frame spent on a moving screen",
       writes == before)
 
--- The third door: not a warp and not a battle, just letting go of the pad.
+-- The third door: not a warp and not a battle, just standing still -- and it
+-- has to be standing still, not the one-frame gap where a player lets go of
+-- the pad to change direction.
 held = false
 run(1)
-check("the moment the player stands still, it writes", writes == before + 1)
+check("a second of not walking is not standing still", writes == before)
+run(3)
+check("a few seconds of it is, and it writes there", writes == before + 1)
 held = true
 
 -- And the frame between two strides is not standing still.  `moving` is false
@@ -161,7 +167,7 @@ player.moving = false
 run(5)
 check("the gap between two strides is not an opening", writes == before)
 held = false
-run(1)
+run(4)
 check("but a real stop is", writes == before + 1)
 held = true
 
@@ -226,11 +232,85 @@ check("SAVE ON LOADS off writes nothing on the screen", writes == before)
 run(2)
 check("and does not write into the walk either", writes == before)
 held = false
-run(2)
+run(4)
 check("but hands the save back to the route once the player stops",
       writes == before + 1)
 held = true
 opts.on_load = true
+
+-- ---------- 8. the windows that are not warps and not battles
+--
+-- A save has to go somewhere, and waiting for a door or a fight is waiting
+-- longer than it has to.  Any moment the player COULD not move is a window:
+-- a text box while an NPC is talking, the START menu, a mart, a PC, a Center's
+-- heal.  The stack says so -- something over the overworld is something the
+-- player is being held still by -- so none of them has to be named here.
+
+held = true                          -- walking the whole time, so the route
+                                     -- path can never be what writes
+run(25)
+before = writes
+emit("pokemon.caught")
+run(2)
+check("walking, a due save is still waiting", writes == before)
+
+-- talking to somebody: the box is up AND the script is mid-run, so the state
+-- is half-written and this is not the moment
+scripting = true
+screens[#screens + 1] = { textbox = true }
+run(2)
+check("mid-conversation is not a moment to write one down", writes == before)
+
+-- the conversation ends: the script is finished, the box is gone, and the
+-- player is standing exactly where it left them -- which is a window in its
+-- own right, without waiting out the three seconds a cold stop needs
+scripting = false
+held = false
+table.remove(screens)
+run(1)
+check("the moment it ends is", writes == before + 1)
+held = true
+
+-- a plain menu is a window straight away: nothing is half-done behind it
+run(25)
+before = writes
+emit("pokemon.caught")
+run(2)
+check("walking, still waiting", writes == before)
+screens[#screens + 1] = { menu = true }
+run(1 / 30)
+check("the START menu is a window on the frame it opens", writes == before + 1)
+table.remove(screens)
+
+-- and the start of a battle, behind its own intro
+run(25)
+before = writes
+emit("pokemon.caught")
+run(2)
+check("walking, still waiting", writes == before)
+emit("battle.started")
+check("a battle starting writes it behind the intro", writes == before + 1)
+emit("battle.ended")
+
+-- ---------- 9. and never inside the battle itself
+--
+-- Gen 1 has no save inside a battle and neither has this: the file would
+-- record the overworld the fight started from while the player is somewhere
+-- else entirely.  The END of it is a window and a better one.
+--
+-- No run() before this one on purpose: the battle above wrote on this same
+-- clock, so MIN_GAP refuses the start of this one and the only thing left
+-- that could write is the battle itself, which is the point.
+
+before = writes
+emit("battle.started")
+emit("pokemon.caught")
+screens[#screens + 1] = { battle = true }
+run(30)
+check("nothing is written inside a battle", writes == before)
+table.remove(screens)
+emit("battle.ended")
+check("the end of it writes", writes == before + 1)
 
 print(string.format("\n%d/%d checks passed  (gen1autosave on-load)",
                     passed, passed + failed))

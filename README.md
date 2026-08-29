@@ -86,7 +86,7 @@ does not land on top of a save you just made yourself.
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
 | `ON QUIT` | on | Offer the save in the QUIT confirm, and wait for it. |
 | `HEAL CONFLICTS` | on | Answer a "conflict" that is really your own lost upload. |
-| `SAVE ON LOADS` | on | Save on the black screen a warp or a battle already puts up. |
+| `SAVE ON LOADS` | on | Save in a moment you could not move in: a door, a battle, a menu. |
 | `QUIET SYNC` | on | Keep a sync cycle out of the frames you are walking through. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
@@ -254,17 +254,47 @@ had *stopped*, so what it actually did was give up and write into a stride —
 the one frame this whole path exists to avoid, arriving reliably rather than by
 accident.
 
-A due save now waits for as long as the walking lasts, and leaves by one of
-three doors: a warp, the end of a battle, or **you standing still**. There is no
-fourth.
+#### The windows
 
-That third door is why the wait is safe to leave open. "Standing still" is not
-`moving == false`: that flag drops for the single frame between two strides, so
-somebody walking a long route without stopping satisfies it several times a
-second, and that gap is precisely where a dropped frame is seen — the screen is
-scrolling on both sides of it. A held direction says the next stride begins on
-the next frame, so it is not idle and nothing is written into it. Let go of the
-pad and the save lands on the next frame.
+A warp and the end of a battle are two of them, and they were the only two for
+a while, which made a due save wait longer than it had to. The real rule is
+wider: **any moment you could not move if you wanted to** is a moment worth
+spending a frame in, and the game gives you a lot of them.
+
+| Window | Why |
+| --- | --- |
+| A warp | The screen is already black; `map.entered`, so the new map, cell and facing are all in place |
+| A battle starting | Behind its own intro, and the save is of the overworld you left |
+| A battle ending | The return hold, before the fade back |
+| A text box, while an NPC talks | You are being held still by the conversation |
+| The START menu, the bag, the party, a PC, a mart, a Center's heal | Same — anything over the overworld |
+| Standing still | A *real* stop, not a pause |
+
+Nothing here is a list of named events. Something over the overworld is
+something holding you still, so the stack answers all of the middle rows at
+once — including the ones this table does not name.
+
+Two of them are held back on purpose. **Inside** a battle nothing is written:
+Gen 1 has no save there and neither has this, because the file would record the
+overworld the fight started from while you are somewhere else entirely. And
+**part-way through a script** nothing is written either — a script that has set
+some of its flags and not the rest is not a state to write down, and a save
+taken there can drop you back into a half-finished cutscene. The moment a
+script *ends* is a window, and by then it is finished and you are standing
+where it left you.
+
+#### What counts as standing still
+
+Not `moving == false`: that flag drops for the single frame between two
+strides, so somebody walking a long route without stopping satisfies it several
+times a second, and that gap is precisely where a dropped frame is seen — the
+screen is scrolling on both sides of it.
+
+Not one frame of not-walking either. Letting go of the pad to change direction,
+lining up on a doorway, thinking for a second: all of those look identical to a
+stop and none of them is one. A stop is **three unbroken seconds** of standing
+there — or the moment a menu closed or a conversation ended and you have not
+started moving again, which is a window of its own for a second and a half.
 
 Every other rule still applies on a loading screen: the floor between writes, a
 live sync transfer, an unresolved conflict and a player still mid-step all
@@ -289,19 +319,26 @@ visible stutter, because the walk cycle and the camera are both part-way
 between tiles and both jump when one frame is worth two.
 
 So `QUIET SYNC` holds a cycle that has a reply in hand out of the frames you are
-walking through, and runs it on the first frame you are not. Any menu, text box,
-battle, doorway or pause releases it immediately — all of them take the
-overworld off the top of the stack, and none of them is a frame a dropped frame
-shows in. Only when a reply is actually in flight: the cheap tick that *starts*
-a cycle is never held, since holding it would stop the engine's clock for no
-reason.
+walking through, and runs it in the next window — the same windows above, plus
+the two the write is barred from. A battle is a fine frame to spend and a
+terrible one to save in; the sync takes it, the write does not.
 
-"Walking" is the same question `SAVE ON LOADS` asks, and it has to be asked the
-same way. This used to read the player's `moving` flag alone, which drops for
-the single frame between two strides — so someone walking a long route without
+**The write is not waiting for the sync, and the sync is not waiting for the
+write.** Those are two errands and pairing them was costing both: the write is
+cheap and wants the first window it can get, the cycle it wakes is expensive and
+does not arrive for another few seconds. So the save goes down at the door you
+walked through, and the cycle takes whatever comes next — the next door, the
+next battle, the next conversation, or you stopping.
+
+Only when a reply is actually in flight: the cheap tick that *starts* a cycle is
+never held, since holding it would stop the engine's clock for no reason.
+
+"Walking" is the same question the write asks, and it has to be asked the same
+way. This used to read the player's `moving` flag alone, which drops for the
+single frame between two strides — so someone walking a long route without
 stopping offered the hold an opening several times a second, and the plan took
 it, landing in the exact frame the hold exists to protect. A held direction
-counts as walking now.
+counts as walking now, and so does a one-frame pause in the middle of one.
 
 There is no cap on the hold either. There was one — three seconds, so that
 holding a direction across Route 21 could not starve sync — and it did not check

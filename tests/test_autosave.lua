@@ -131,7 +131,9 @@ run(400)
 check("never writes while the player is moving", writes == 2)
 player.moving = false
 run(2)
-check("writes once the overworld settles", writes == 3)
+check("nor two seconds after the player stops", writes == 2)
+run(2)
+check("writes once the overworld has been still for a few seconds", writes == 3)
 
 -- 6. no write while sync is transferring or in conflict
 emit("world.stepped")
@@ -533,13 +535,19 @@ run(400)
 check("disabled writes nothing", writes == settled)
 opts.enabled = true
 
--- 5b. and not into the gap between two strides
+-- 5b. and not into the gap between two strides, nor into a pause in a walk
 --
 -- `moving` drops for one frame between strides, so a player who never stops
 -- walking passes the check above several times a second -- which is exactly
 -- where a dropped frame is seen.  A held direction says the next stride starts
 -- on the next frame.  Read off the raw input here, since this overworld has no
 -- dirHeld to ask.
+--
+-- And letting go of the pad is not a stop.  Changing direction, lining up on
+-- a doorway, thinking for a second: all of those look identical to standing
+-- still for one frame, and a write in any of them lands in the middle of the
+-- walk from the player's side of the screen.  A stop is STILL_FOR seconds of
+-- one.
 emit("world.stepped")
 run(25)
 local beforeStride = writes
@@ -549,6 +557,14 @@ player.moving = false
 run(400)
 check("never writes between two strides of a walk", writes == beforeStride)
 downButtons.left = false
-run(2)
-check("and writes the moment the pad is let go", writes == beforeStride + 1)
+run(1)
+check("nor in a one second pause in the middle of one", writes == beforeStride)
+downButtons.left = true
+run(1)
+downButtons.left = false
+run(1)
+check("and the pause does not accumulate across the steps between it",
+      writes == beforeStride)
+run(3)
+check("but a real stop is a window", writes == beforeStride + 1)
 
