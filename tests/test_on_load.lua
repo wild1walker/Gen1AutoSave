@@ -312,6 +312,63 @@ table.remove(screens)
 emit("battle.ended")
 check("the end of it writes", writes == before + 1)
 
+-- ---------- 10. a route seam is not a door
+--
+-- The engine says which map changes had a screen: map.entered carries `via`.
+-- A door, stairs, a cave and FLY all fade out and back.  Walking from Route 1
+-- into Viridian does not -- routes are stitched together, the map scrolls on,
+-- and the player is mid-stride the whole way across.  So a seam is neither a
+-- window to write in nor a checkpoint worth writing for.
+
+held = true                          -- running, the whole section
+run(25)
+before = writes
+emit("pokemon.caught")               -- something real to save
+run(2)
+check("running, a due save is waiting", writes == before)
+
+emit("map.entered", { via = "connection" })
+check("crossing a route seam does not write it there", writes == before)
+run(2)
+check("and does not sneak it into the walk after", writes == before)
+
+emit("map.entered", { via = "reload" })
+check("nor does a mod rebuilding the map underfoot", writes == before)
+
+emit("map.entered", { via = "boot" })
+check("nor the game starting up", writes == before)
+
+emit("map.entered", { via = "warp" })
+check("a door does", writes == before + 1)
+
+-- and a seam does not make a save due in the first place: nothing else here
+-- is a checkpoint, so if the crossing were one this would write at the door
+run(25)
+before = writes
+emit("world.stepped")                -- dirty, but not a checkpoint
+emit("map.entered", { via = "connection" })
+run(2)
+check("a seam does not make a save due either", writes == before)
+held = false
+run(5)
+check("...not even once the player stands still", writes == before)
+held = true
+
+-- FLY has a screen of its own
+run(25)
+before = writes
+emit("pokemon.caught")
+emit("map.entered", { via = "fly" })
+check("FLY writes, it has an animation of its own", writes == before + 1)
+
+-- an engine too old to say anything keeps the old answer, so a build that
+-- predates `via` cannot silently stop saving at doors
+run(25)
+before = writes
+emit("pokemon.caught")
+emit("map.entered")
+check("a map.entered with no via at all still writes", writes == before + 1)
+
 print(string.format("\n%d/%d checks passed  (gen1autosave on-load)",
                     passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

@@ -268,6 +268,31 @@ you just left and the spot you left it from. Entered fires once the new map, you
 cell and your facing are all in place, with the transition still up — coherent
 state, screen still covered.
 
+#### A route seam is not a door
+
+Not every map change has a screen in front of it, and the engine says which is
+which: `map.entered` carries a `via`, and only some of its words mean the screen
+went black.
+
+| `via` | |
+| --- | --- |
+| `warp` | a door, stairs, a cave mouth, a mod's own warp — **has a screen** |
+| `fly` | FLY, which has an animation of its own — **has a screen** |
+| `connection` | a route seam: seamless, no screen at all |
+| `reload` | a mod rebuilding the map under your feet, in place |
+| `boot` / `continue` | the game has just started; there is nothing new to write |
+
+Walking from Route 1 into Viridian is a `connection`. The routes are stitched
+together — the map simply scrolls on, and you are mid-stride the whole way
+across. That matters twice over. It is the exact frame this mod exists to keep
+a write out of, and **it is not a checkpoint either**: crossing from one route
+to the next while running is not progress worth stopping for, it is running.
+
+So a seam neither writes a save nor asks for one. A save that was already due
+stays due and goes at the next real window. An engine too old to say anything
+at all gets the old answer, so a build that predates `via` cannot silently stop
+saving at doors.
+
 Waiting is not on a clock. There used to be a 45-second cap here, on the
 reasoning that a player who had not warped or fought in that long was standing
 somewhere quiet and a save on the route beat no save. It did not check that they
@@ -284,7 +309,7 @@ spending a frame in, and the game gives you a lot of them.
 
 | Window | Why |
 | --- | --- |
-| A warp | The screen is already black; `map.entered`, so the new map, cell and facing are all in place |
+| A warp, or FLY | The screen is already black; `map.entered`, so the new map, cell and facing are all in place. A route seam is **not** one of these — see above |
 | A battle starting | Behind its own intro, and the save is of the overworld you left |
 | A battle ending | The return hold, before the fade back |
 | A text box, while an NPC talks | You are being held still by the conversation |
