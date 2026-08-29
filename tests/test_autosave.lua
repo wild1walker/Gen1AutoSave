@@ -33,12 +33,18 @@ local mod = {
 }
 
 local player = { moving = false }
+-- Deliberately no `dirHeld` here: this overworld is the shape an engine older
+-- than OverworldState:dirHeld has, so the mod has to fall back to asking the
+-- raw input whether a direction is down.  test_on_load.lua covers the other
+-- half, where the overworld answers for itself.
 local ow = { player = player, scriptMoves = {}, runner = nil }
+local downButtons = {}
 local syncState = { busy = false, phase = "idle", uploadAt = nil,
                     protectedKey = nil, conflicts = nil }
 local screens, returned = {}, 0
 local game = {
   overworld = ow,
+  input = { isDown = function(_, button) return downButtons[button] == true end },
   stack = {
     top = function() return screens[#screens] or ow end,
     push = function(_, s) screens[#screens + 1] = s end,
@@ -525,3 +531,24 @@ opts.enabled = false
 emit("world.stepped")
 run(400)
 check("disabled writes nothing", writes == settled)
+opts.enabled = true
+
+-- 5b. and not into the gap between two strides
+--
+-- `moving` drops for one frame between strides, so a player who never stops
+-- walking passes the check above several times a second -- which is exactly
+-- where a dropped frame is seen.  A held direction says the next stride starts
+-- on the next frame.  Read off the raw input here, since this overworld has no
+-- dirHeld to ask.
+emit("world.stepped")
+run(25)
+local beforeStride = writes
+emit("pokemon.caught")
+downButtons.left = true
+player.moving = false
+run(400)
+check("never writes between two strides of a walk", writes == beforeStride)
+downButtons.left = false
+run(2)
+check("and writes the moment the pad is let go", writes == beforeStride + 1)
+
