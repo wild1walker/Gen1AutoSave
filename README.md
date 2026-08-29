@@ -86,6 +86,7 @@ does not land on top of a save you just made yourself.
 | `AFTER EVENTS` | on | Save after battles, catches, new areas and so on. |
 | `ON QUIT` | on | Offer the save in the QUIT confirm, and wait for it. |
 | `HEAL CONFLICTS` | on | Answer a "conflict" that is really your own lost upload. |
+| `SAVE ON LOADS` | on | Write during a screen a warp or a battle already blacks out. |
 | `QUIET SYNC` | on | Keep a sync cycle out of the frames you are mid-step in. |
 | `INDICATOR` | POKE BALL | `OFF`, `POKE BALL`, `SAVED TEXT`, or `TEXT BOX`. |
 | `SAVE BACKUPS` | off | Keep rollback copies. Adds `BACKUPS` to the START menu. |
@@ -227,6 +228,32 @@ A sync cycle leaves the same debt, more of it: planning decoded every slot into
 a full table again, a character at a time. So the same catch-up runs in the
 frame a cycle finishes on — every cycle, not only the ones an autosave woke,
 since after the pacing above most of them are the engine's own sweep.
+
+### Saving on a screen you cannot see
+
+The write is not what you feel; where its frame lands is. On the route that
+frame is a stutter in the middle of walking, which is the one place a dropped
+frame shows.
+
+The game already blacks the screen out twice for its own reasons — a warp fades
+out, swaps the map and fades back, and a battle ends behind a hold and a fade.
+Nobody can see a frame during either. So `SAVE ON LOADS` holds a due save until
+one of those comes round and writes it there: the loading screen is a few frames
+longer, and nothing else changes.
+
+It writes on **`map.entered`**, not `map.exited`. Exited fires at the top of
+`setMap`, before the new map is loaded, so a save written there records the map
+you just left and the spot you left it from. Entered fires once the new map, your
+cell and your facing are all in place, with the transition still up — coherent
+state, screen still covered.
+
+Waiting is not forever. A save that has not found a screen within about
+three quarters of a minute is written on the route as before, because a player
+who has not changed maps or fought anything in that long is standing somewhere
+quiet, and a save on the route beats no save. Every other rule still applies on a
+loading screen: the floor between writes, a live sync transfer, an unresolved
+conflict and a player still mid-step all refuse it exactly as they would anywhere
+else.
 
 ### And where the last of it lands
 

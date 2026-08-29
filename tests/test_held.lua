@@ -9,9 +9,11 @@
 -- back what got drawn, rather than mirroring the drawing code and checking the
 -- mirror.
 
+-- SAVE ON LOADS off: the hold badge is about the route path's refusal to write
+-- under an unresolved conflict, which is what this drives.
 local opts = {
   enabled = true, interval = 0, events = true, onquit = true,
-  notify = "ball", backups = false,
+  notify = "ball", backups = false, on_load = false,
 }
 
 -- ---- a love.graphics that writes down what it was asked to draw ----------

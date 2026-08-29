@@ -6,9 +6,13 @@
 local writes = 0
 local emit                       -- forward: writeSave below emits through it
 
+-- SAVE ON LOADS off: what a write costs AFTER it lands is the subject here,
+-- and it costs the same whichever screen it landed on.  Driving the route path
+-- keeps the save() helper below a plain "ask, then step to the frame it writes
+-- on" rather than one that has to stage a warp first.
 local opts = {
   enabled = true, interval = 0, events = true, onquit = true,
-  notify = "icon", backups = false,
+  notify = "icon", backups = false, on_load = false,
 }
 
 local handlers, chains = {}, {}
