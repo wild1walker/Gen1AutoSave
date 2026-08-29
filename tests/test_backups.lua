@@ -1,8 +1,10 @@
 -- Backup-ring and rollback harness: in-memory storage, a fake checkpoint
 -- service and a fake screen stack.
 local writes, captures = 0, 0
+-- SAVE ON LOADS off: the ring is about what a write leaves behind, not about
+-- which screen the write happened on, so this drives the route path directly.
 local opts = { enabled = true, interval = 300, events = true, onquit = true,
-               notify = "icon", backups = true, keep = 3 }
+               notify = "icon", backups = true, keep = 3, on_load = false }
 
 local handlers, chains = {}, {}
 local store = {}

@@ -2,8 +2,13 @@
 local writes = 0
 local vetoed = false
 
+-- SAVE ON LOADS off: this suite drives the ROUTE path, where a due save is
+-- written on the map once the overworld settles.  With the row on, a due save
+-- waits up to LOAD_WAIT for a warp or a battle to take it on a black screen
+-- instead, which is a different contract and has a suite of its own
+-- (test_on_load.lua).
 local opts = { enabled = true, interval = 300, events = true, onquit = true,
-               notify = "icon", heal = true }
+               notify = "icon", heal = true, on_load = false }
 
 local handlers, chains = {}, {}
 local schema, boxes = nil, {}
