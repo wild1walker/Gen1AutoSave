@@ -45,7 +45,9 @@ local player = { moving = false }
 local held = false
 local ow = { player = player, scriptMoves = {}, runner = nil,
              dirHeld = function() return held end }
-local syncState = { busy = false, phase = "idle", uploadAt = nil }
+-- SyncEngine.UPLOAD_DEBOUNCE, mirrored: writeSave arms uploadAt this far out.
+local SYNC_UPLOAD_DEBOUNCE = 5
+local syncState = { busy = false, phase = "idle", uploadAt = nil, clock = 100 }
 local screens, returned = {}, 0
 local noEngine = false
 local game = {
@@ -61,13 +63,14 @@ local game = {
   end,
   -- Faithful to Game:writeSave, and the fidelity that matters here is the
   -- ORDER: writeSave emits save.writing to mods first and only then tells the
-  -- sync engine, which arms the five second upload debounce.  A harness whose
-  -- writeSave skips the event cannot see the mod counting its own write
-  -- against the pacing gap, which is the one way this can go quietly wrong.
+  -- sync engine, which arms the five second upload debounce -- so the debounce
+  -- is modelled off the engine's own clock here rather than as a bare number,
+  -- because "the upload was pulled forward to now" is a claim about that
+  -- arithmetic and a constant cannot express it.
   writeSave = function()
     emit("save.writing")
     writes = writes + 1
-    syncState.uploadAt = 5
+    syncState.uploadAt = (syncState.clock or 0) + SYNC_UPLOAD_DEBOUNCE
     return true
   end,
   -- reads come from syncState, writes go back to it, so the mod disarming
@@ -97,7 +100,6 @@ local function check(label, cond)
   print((cond and "PASS  " or "FAIL  ") .. label)
 end
 
-local UPLOAD_GAP = 300
 
 -- The most allocation credit the nudge after a write may ask the collector
 -- for, in KB, over all of its steps.
@@ -173,36 +175,62 @@ check("a collector that errors does not take the save with it", save())
 gcBoom = false
 gcFinishAfter = 1
 
--- ---------- 2. how often an autosave wakes the sync engine
+-- ---------- 2. every autosave hands its upload straight to sync
 --
--- Planning a sync decodes every save slot of every version on the main
--- thread, so doing it once per autosave is the loudest thing this mod can do
--- to a linked device.  One autosave-woken upload per gap; the rest ride the
--- engine's own five minute sweep, which uploads anything whose savedAt moved.
+-- A save is not finished when it reaches the disk, it is finished when it
+-- reaches the account.  This used to pace uploads -- one autosave-woken upload
+-- every five minutes, every other write's debounce disarmed, the file left for
+-- the engine's own sweep -- which meant the newest save could sit on one
+-- device for minutes while a second device was still being handed the old one.
+--
+-- Now the upload goes with the save, every time, and it goes NOW: the five
+-- second debounce is there to coalesce a burst, and MIN_GAP already puts
+-- twenty seconds between any two writes, so waiting it out only moves the
+-- request from the black screen the save landed on to the middle of whatever
+-- came next.
 
-emit("save.loaded")                  -- a fresh playthrough: the gap is open
+emit("save.loaded")
 check("an autosave leaves its upload armed", save() and syncState.uploadAt ~= nil)
+check("and armed for now, not five seconds out",
+      syncState.uploadAt == syncState.clock)
 
--- The regression this section exists for: writeSave emits save.writing to
--- mods, our own write included.  Counting that as "sync has been woken" would
--- close the gap on every single write and no autosave would ever wake sync
--- again -- the pacing would be a mute, not a floor.
+-- ...which is the whole point: the debounce would have put it here instead
+check("the debounce it replaced would have been later",
+      syncState.clock + SYNC_UPLOAD_DEBOUNCE > syncState.clock)
+
+-- the very next autosave does the same.  Under the old pacing this one was
+-- written to disk and its upload thrown away.
 syncState.uploadAt = nil
-run(UPLOAD_GAP)
-check("a later autosave still wakes sync", save() and syncState.uploadAt ~= nil)
+run(25)
+check("a second autosave lands", save())
+check("and wakes sync too, with no gap to wait out",
+      syncState.uploadAt == syncState.clock)
 
--- a second save inside the gap: written to disk, but it does not wake sync
+-- sync off, unlinked, or nothing to send: writeSave arms nothing, and an
+-- upload that does not exist is not this mod's to invent
 syncState.uploadAt = nil
-check("a second autosave still lands on disk", save())
-check("but it does not wake a second sync", syncState.uploadAt == nil)
+local realWrite = game.writeSave
+game.writeSave = function()
+  emit("save.writing")
+  writes = writes + 1
+  return true                        -- no uploadAt: sync has nothing to do
+end
+run(25)
+check("an autosave with sync quiet still lands", save())
+check("and no upload is conjured for it", syncState.uploadAt == nil)
+game.writeSave = realWrite
 
--- ---------- 3. a save somebody else made counts against the gap
+-- ---------- 3. a manual save is none of this mod's business
+--
+-- It used to be: a manual save counted against the pacing gap, so the next
+-- autosave's upload was thrown away.  With no gap there is nothing to count.
 
 emit("save.loaded")
 emit("save.writing")                 -- a manual save; its upload is on its way
 syncState.uploadAt = nil
+run(25)
 check("an autosave after a manual save still lands", save())
-check("but it does not wake sync again", syncState.uploadAt == nil)
+check("and still wakes sync", syncState.uploadAt == syncState.clock)
 
 -- ---------- 4. picking QUIT is exempt
 --

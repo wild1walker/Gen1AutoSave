@@ -186,20 +186,37 @@ directly. The work is in *not* writing at the wrong moments.
   out of the process and an upload still running finishes there. All the quit
   hook does now is disarm an upload that was scheduled but not started, so the
   exit cannot cut one open; the next launch uploads it as an ordinary change.
-- **One upload woken per five minutes, not one per save.** Planning a sync runs
-  on the main thread, and it reads and *decodes* every save slot of every game
-  version before any of it reaches a worker — through the restricted-grammar
-  reader, which is a character-at-a-time parser written in Lua on purpose, so a
-  tampered save fails to parse instead of executing. A quarter-megabyte slot
-  costs tens of milliseconds, per slot on disk, across six versions, and a
-  phone is worse. Waking that on every autosave — as often as every 20 seconds,
-  with `AFTER EVENTS` on — was the loudest thing this mod did to a linked
-  device. So an autosave wakes an upload at most every five minutes. Writes in
-  between still land on disk; the engine's own five minute sweep carries them
-  up, because planning compares each slot's `savedAt` against the revision it
-  last saw and uploads anything that moved. Picking `QUIT` is exempt: there is
-  no sweep coming for a game that is about to stop running, so that upload has
-  to go now or never.
+- **The upload goes with the save, and it goes immediately.** Planning a sync
+  runs on the main thread, and it reads and *decodes* every save slot of every
+  game version before any of it reaches a worker — through the
+  restricted-grammar reader, which is a character-at-a-time parser written in
+  Lua on purpose, so a tampered save fails to parse instead of executing. A
+  quarter-megabyte slot costs tens of milliseconds, per slot on disk, across
+  six versions, and a phone is worse.
+
+  This mod used to *avoid* that cost: one autosave-woken upload every five
+  minutes, every other write's debounce disarmed, the file left for the
+  engine's own sweep to carry up whenever it next came round. It was cheaper
+  and it was wrong. **A save is not finished when it reaches the disk; it is
+  finished when it reaches the account** — and that policy left the newest save
+  on one device for up to five minutes while a second device could still be
+  handed the old one. Nothing was lost, but the save and the server were out of
+  step for minutes at a time, which is the whole thing sync is for.
+
+  So the cost is *placed* now rather than avoided, and both halves of that were
+  already decided: a write only happens in a window you cannot move in, and the
+  plan is [held out of any frame the screen is moving in](#and-where-the-last-of-it-lands).
+  A sync cycle costs what it costs; it just does not cost it anywhere you are
+  looking.
+
+  And it goes **immediately**. `writeSave` arms a five second debounce, which
+  exists to coalesce a burst of writes — and this mod does not make bursts,
+  since the floor between any two is already twenty seconds. So those five
+  seconds are dead time in the worst possible place: the door's black screen is
+  up *now*, and five seconds later you are halfway down the next corridor.
+  Pulled forward, the request leaves while that screen is still black and the
+  answer comes back to it, or to the frames just after. The loading screen is a
+  little longer for it. That is the trade, and it is the right way round.
 
 ## The frame after a save
 
@@ -356,7 +373,7 @@ decodes every slot. So the stall lands on network time — a moment set by
 latency and the server, with no relation to anything you did. That is exactly
 why it reads as the game hiccupping rather than as the game syncing: nothing on
 screen caused it, and nothing on screen explains it. The engine's own five
-minute sweep lands the same way, and the pacing above never touched that one.
+minute sweep lands the same way, and it always did.
 
 That work cannot be made cheap from here. It can be made to land where it does
 not show. A frame dropped while you are standing still, in a menu, reading a
