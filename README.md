@@ -233,6 +233,41 @@ Measured on a 45 MB heap under LuaJIT, with a 182 KB save file:
 So a plain autosave is about ten milliseconds of real work, and the mod's job is
 to put it where nobody is looking — which is what the windows below are for.
 
+### The frame after the hitch, and why the fade was being skipped
+
+A save is a hitch inside one logic step, and a hitch inside a logic step costs
+more than the frame it took — it costs the animation running over it.
+
+The engine advances logic in whole 1/60 steps out of an accumulator
+(`src/core/FixedStep.lua`). A frame that took 60 ms hands the *next* update a
+`dt` of 60 ms, and the accumulator pays that back as four logic steps in a row
+before anything is drawn again. Four steps of a fade in one frame is not a fade,
+it is a cut: **the black screen a warp puts up gets skipped and you pop into the
+new map.**
+
+The engine knows about this and has a remedy for its own hitches.
+`FixedStep:discardCatchup` drops the pending catch-up and absorbs the oversized
+frame as a single step, so the animation plays out step by step and simply takes
+a little longer in wall-clock. `OverworldState:crossConnection` calls it after a
+map seam for exactly this reason.
+
+It is not called for a warp. FixedStep's own comment says so in as many words —
+*"crossConnection ... is the only caller of discardCatchup, and warps go through
+Transition instead"* — so a hitch under a warp's fade has nothing arming the
+clamp, and this mod's write was that hitch. Pulling the sync upload forward into
+the same black screen made it worse, because the plan is the bigger hitch of the
+two.
+
+So the mod arms it itself, after anything of its own that costs a frame: after
+every write, whatever it cost and however it ended, and after the frame a sync
+reply lands on, which is the frame the plan runs on. This is the engine's own
+call for the engine's own problem; the mod is only admitting that it made one of
+the hitches. **The loading screen is a little longer; it is not skipped.**
+
+Resolved lazily and once, so a host without the module simply gets a no-op. It
+is why this mod declares `engine_internals`: it reaches one engine module, for
+this.
+
 ### The collector, and a mistake this mod made for a long time
 
 One encode allocates about **2.8 MB** of short-lived strings and tables. That is

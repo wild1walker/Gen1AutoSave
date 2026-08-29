@@ -1,7 +1,7 @@
 {
   "id": "gen1autosave",
   "name": "Gen1AutoSave",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "api": 2,
   "games": [
     "all"
@@ -14,6 +14,9 @@
   "priority": 50,
   "dependencies": [],
   "optional_dependencies": [],
+  "permissions": [
+    "engine_internals"
+  ],
   "conflicts": [
     "recomp-autosave"
   ],

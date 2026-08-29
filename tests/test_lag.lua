@@ -50,6 +50,7 @@ local SYNC_UPLOAD_DEBOUNCE = 5
 local syncState = { busy = false, phase = "idle", uploadAt = nil, clock = 100 }
 local screens, returned = {}, 0
 local noEngine = false
+local vetoed = false
 local game = {
   overworld = ow,
   stack = {
@@ -69,6 +70,9 @@ local game = {
   -- arithmetic and a constant cannot express it.
   writeSave = function()
     emit("save.writing")
+    -- a veto (another mod's save.write hook returning false) still cost the
+    -- frame it took to get here
+    if vetoed then return false end
     writes = writes + 1
     syncState.uploadAt = (syncState.clock or 0) + SYNC_UPLOAD_DEBOUNCE
     return true
@@ -121,6 +125,16 @@ local GC_BUDGET_KB = 2048
 -- The collector, watched.  The mod looks `collectgarbage` up as a global at
 -- call time, so swapping it here is enough to see every step it asks for --
 -- and how big each one was.
+-- The engine's frame pacer, watched.  A hitch inside a logic step makes the
+-- next dt huge, and FixedStep pays that back as a burst of steps before the
+-- next draw -- which over a warp's fade is not a fade, it is a cut.  The mod
+-- is supposed to arm the engine's own clamp after anything of its own that
+-- costs a frame; this counts the calls.
+local catchupDiscards = 0
+package.loaded["src.core.FixedStep"] = {
+  discardCatchup = function() catchupDiscards = catchupDiscards + 1 end,
+}
+
 local realGC = collectgarbage
 local gcSteps, gcCredit, gcFinishAfter, gcBoom = 0, 0, 1, false
 collectgarbage = function(what, arg)
@@ -174,6 +188,35 @@ gcBoom = true
 check("a collector that errors does not take the save with it", save())
 gcBoom = false
 gcFinishAfter = 1
+
+-- ---------- 1b. the frame after the hitch
+--
+-- A save is a hitch inside one logic step, and the engine pays an oversized
+-- dt back as several logic steps before the next draw.  Over a warp's black
+-- screen that is the fade being skipped -- the player pops into the new map.
+-- FixedStep:discardCatchup is the engine's own remedy (crossConnection calls
+-- it after a map seam); warps do not, so a hitch under one has nothing arming
+-- the clamp, and this mod's write was that hitch.
+
+catchupDiscards = 0
+check("a third autosave lands", save())
+check("and absorbs the frame it cost, so the fade is not skipped",
+      catchupDiscards >= 1)
+
+-- a write that FAILS cost a frame too; the clamp is not conditional on the
+-- save having worked
+catchupDiscards = 0
+vetoed = true
+run(25)
+emit("map.entered")
+run(2)
+vetoed = false
+check("a vetoed write still absorbs its frame", catchupDiscards >= 1)
+
+-- and a frame with no write in it arms nothing
+catchupDiscards = 0
+run(120)
+check("an ordinary frame arms nothing", catchupDiscards == 0)
 
 -- ---------- 2. every autosave hands its upload straight to sync
 --
@@ -346,7 +389,16 @@ check("disabled leaves the upload alone", syncState.uploadAt == 500)
 
 opts.enabled = true
 local ticked = 0
-syncState.update = function() ticked = ticked + 1 end
+-- The mod wraps engine.update, and the stub's __newindex means that wrapper
+-- REPLACES syncState.update -- so this is the inner function the wrapper
+-- captures, and reassigning syncState.update later would throw the wrapper
+-- away and test nothing.  `consumeReply` is how a later block makes the inner
+-- update clear the pending reply, which is what a real plan does.
+local consumeReply = false
+syncState.update = function()
+  ticked = ticked + 1
+  if consumeReply then syncState.pending = nil end
+end
 syncState.pending = { handle = 1 }
 
 player.moving = false
@@ -443,6 +495,28 @@ player.moving = true
 ticked = 0
 tick()
 check("a tick with no reply in flight is never held", ticked == 1)
+
+-- The frame a reply lands on is the frame the plan runs on, and the plan is
+-- the expensive half of a cycle -- so it is a hitch like a write is, and it
+-- arms the engine's clamp for the same reason.  Without this the fade a
+-- pulled-forward upload lands under gets skipped exactly as a write's did.
+syncState.pending = { handle = 1 }
+held = false
+player.moving = false
+run(4)                               -- a real stop: a quiet frame to run in
+consumeReply = true
+catchupDiscards = 0
+ticked = 0
+tick()
+check("the plan runs on a quiet frame", ticked == 1)
+check("and absorbs the frame it cost", catchupDiscards == 1)
+
+-- a tick that consumes nothing arms nothing
+consumeReply = false
+syncState.pending = nil
+catchupDiscards = 0
+tick()
+check("a tick with no reply to consume arms nothing", catchupDiscards == 0)
 
 -- and the row turns it all the way off
 syncState.pending = { handle = 1 }
