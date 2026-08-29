@@ -369,6 +369,91 @@ emit("pokemon.caught")
 emit("map.entered")
 check("a map.entered with no via at all still writes", writes == before + 1)
 
+-- ---------- 12. the write goes at the START of the fade, not the end
+--
+-- map.entered is the END of a warp's animation: the fade to black has already
+-- played by the time it fires, and the fade back is zero steps long.  A write
+-- there had nothing left in front of it to hide under, so what the player saw
+-- was the door popping them through.  The first frames of the transition are
+-- the other side of the same black screen, and thirty-two steps of fade come
+-- after them.
+--
+-- The transition is a screen over the overworld, exactly as it is in the
+-- engine, so this also covers the ordering in writeWindow: an ordinary due
+-- save must not take the fade for a menu and write into the middle of it.
+
+held = true
+run(25)
+before = writes
+emit("pokemon.caught")
+run(2)
+check("walking, a due save is waiting", writes == before)
+
+-- the door: the screen starts going black, and the transition goes on the
+-- stack the way the engine puts it there
+ow.transitioning = true
+screens[#screens + 1] = { transition = true }
+run(1 / 60)
+check("the save goes on the first frame of the fade", writes == before + 1)
+
+-- ...and map.entered, which is the far end of that same fade, must not write
+-- a second time for one door
+before = writes
+run(0.4)                             -- the rest of a 32-step fade
+ow.transitioning = false
+table.remove(screens)
+emit("map.entered")
+check("the far end of the same fade does not write again", writes == before)
+
+-- A fade the player is mid-stride through is not writable -- that guard is
+-- the whole point of the path -- and then map.entered is the fallback that
+-- catches the warp.
+run(25)
+before = writes
+emit("pokemon.caught")
+player.moving = true
+ow.transitioning = true
+screens[#screens + 1] = { transition = true }
+run(0.4)
+check("a fade the player is still mid-stride through writes nothing",
+      writes == before)
+player.moving = false
+ow.transitioning = false
+table.remove(screens)
+emit("map.entered")
+check("and map.entered catches that warp instead", writes == before + 1)
+
+-- TELEPORT blacks out through teleportOut rather than transitioning, and it
+-- is the same window.
+run(25)
+before = writes
+emit("pokemon.caught")
+run(2)
+ow.teleportOut = true
+screens[#screens + 1] = { transition = true }
+run(1 / 60)
+check("TELEPORT's own fade is a window too", writes == before + 1)
+ow.teleportOut = false
+table.remove(screens)
+
+-- With SAVE ON LOADS off, the fade is not a window and the save waits for the
+-- player to stop, the same as every other screen.
+opts.on_load = false
+run(25)
+before = writes
+emit("pokemon.caught")
+ow.transitioning = true
+screens[#screens + 1] = { transition = true }
+run(0.4)
+check("SAVE ON LOADS off does not write under the fade", writes == before)
+ow.transitioning = false
+table.remove(screens)
+held = false
+run(4)
+check("and the save comes back to the route", writes == before + 1)
+held = true
+opts.on_load = true
+
 print(string.format("\n%d/%d checks passed  (gen1autosave on-load)",
                     passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

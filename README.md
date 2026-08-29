@@ -269,7 +269,11 @@ That second one is measured by the clock rather than by watching the engine's
 inside one call, a before/after comparison sees nothing happen, and the check
 never fired once.
 
-**And a fade is not a free frame.** This used to count a transition as the
+**And a fade is not a free frame.** (`writeWindow`, the gate the ordinary due
+save goes through, had the same two lines in the wrong order for longer: it
+asked "is something over the overworld?" first, and a transition *is* something
+over the overworld, so it answered yes for the one frame it most needed to
+answer no for.) This used to count a transition as the
 quietest frame there was, on the grounds that none of the map is on screen. That
 was wrong twice: the warp fade is thirty-two logic steps of a palette walking
 down to black, so a fifth of a second of freeze in the middle of it is a stall
@@ -331,11 +335,31 @@ Nobody can see a frame during either. So `SAVE ON LOADS` holds a due save until
 one of those comes round and writes it there: the loading screen is a few frames
 longer, and nothing else changes.
 
-It writes on **`map.entered`**, not `map.exited`. Exited fires at the top of
-`setMap`, before the new map is loaded, so a save written there records the map
-you just left and the spot you left it from. Entered fires once the new map, your
-cell and your facing are all in place, with the transition still up — coherent
-state, screen still covered.
+#### The start of the fade, not the end of it
+
+`map.entered` is the *end* of a warp's animation. The fade to black has already
+played by the time it fires, and the fade back is zero steps long — the map
+simply appears. So a write there had the whole cost of a save in front of it
+and no animation left to hide under, and what you saw was the door popping you
+through.
+
+The first frames of the same black screen are on the other side of it, with all
+thirty-two steps of the fade still to come. The write goes there instead: the
+clamp absorbs the oversized frame as one logic step and the palette then walks
+down to black one step per drawn frame, the way it is meant to. **The black
+screen is longer by exactly what the write cost. The animation is not.**
+
+The state written is the doorway you are leaving — a tile and a facing you
+chose, on a map you know. It is tried on every frame of the fade rather than
+only the first, because the first is the one you may still be mid-stride on and
+a write is never taken there; once one lands, the save stops being due and the
+rest of the fade costs a table lookup.
+
+`map.entered` is still the fallback, for a warp whose fade was never writable —
+inside `MIN_GAP`, a sync mid-answer, a script still running. It writes the far
+side instead. It is `map.entered` rather than `map.exited` because exited fires
+at the top of `setMap`, before the new map is loaded, so a save written there
+records neither end of the warp coherently.
 
 #### A route seam is not a door
 
@@ -378,7 +402,7 @@ spending a frame in, and the game gives you a lot of them.
 
 | Window | Why |
 | --- | --- |
-| A warp, or FLY | The screen is already black; `map.entered`, so the new map, cell and facing are all in place. A route seam is **not** one of these — see above |
+| A warp, FLY or TELEPORT | The screen is going black, and the write goes at the **start** of that fade rather than the end of it — see below. A route seam is **not** one of these — see above |
 | A battle starting | Behind its own intro, and the save is of the overworld you left |
 | A battle ending | The return hold, before the fade back |
 | A text box, while an NPC talks | You are being held still by the conversation |
