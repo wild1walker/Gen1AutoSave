@@ -259,8 +259,25 @@ the same black screen made it worse, because the plan is the bigger hitch of the
 two.
 
 So the mod arms it itself, after anything of its own that costs a frame: after
-every write, whatever it cost and however it ended, and after the frame a sync
-reply lands on, which is the frame the plan runs on. This is the engine's own
+every write, whatever it cost and however it ended, and after any sync tick that
+**took longer than half a frame**.
+
+That second one is measured by the clock rather than by watching the engine's
+`pending` handle, and the first attempt at it made exactly that mistake.
+`_planFrom` queues the uploads it decided on and the task loop at the end of the
+*same* `update` starts the next one — so `pending` goes non-nil → nil → non-nil
+inside one call, a before/after comparison sees nothing happen, and the check
+never fired once.
+
+**And a fade is not a free frame.** This used to count a transition as the
+quietest frame there was, on the grounds that none of the map is on screen. That
+was wrong twice: the warp fade is thirty-two logic steps of a palette walking
+down to black, so a fifth of a second of freeze in the middle of it is a stall
+you can see — and because those steps are counted per *logic step*, the
+oversized frame afterwards is paid back as a burst that runs the rest of the
+fade before anything is drawn. Between them, walking through a door came out as
+a pop. The plan waits for a text box, a menu, or a real stop instead: frames
+where nothing is animating at all. This is the engine's own
 call for the engine's own problem; the mod is only admitting that it made one of
 the hitches. **The loading screen is a little longer; it is not skipped.**
 
