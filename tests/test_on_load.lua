@@ -238,13 +238,20 @@ check("but hands the save back to the route once the player stops",
 held = true
 opts.on_load = true
 
--- ---------- 8. the windows that are not warps and not battles
+-- ---------- 8. a menu is NOT a window
 --
--- A save has to go somewhere, and waiting for a door or a fight is waiting
--- longer than it has to.  Any moment the player COULD not move is a window:
--- a text box while an NPC is talking, the START menu, a mart, a PC, a Center's
--- heal.  The stack says so -- something over the overworld is something the
--- player is being held still by -- so none of them has to be named here.
+-- It used to be the widest one this had: anything over the overworld -- the
+-- START menu, the bag, the party, a PC, a mart, a text box -- on the grounds
+-- that the player COULD not move and the map behind is a still picture, so a
+-- dropped frame there is a frame nobody sees.
+--
+-- Nobody sees it.  They feel it.  A menu is not a pause in the playing, it is
+-- the part with the most presses per second in it, and a frame lost there is
+-- an INPUT lost there.  A stutter mid-stride is ugly; a swallowed A press is
+-- the game not listening.
+--
+-- So a screen over the overworld is a refusal, and the doors are the three
+-- the README always named: a warp, the end of a battle, and stopping.
 
 held = true                          -- walking the whole time, so the route
                                      -- path can never be what writes
@@ -254,16 +261,15 @@ emit("pokemon.caught")
 run(2)
 check("walking, a due save is still waiting", writes == before)
 
--- talking to somebody: the box is up AND the script is mid-run, so the state
--- is half-written and this is not the moment
+-- talking to somebody: the box is up AND the script is mid-run
 scripting = true
 screens[#screens + 1] = { textbox = true }
 run(2)
 check("mid-conversation is not a moment to write one down", writes == before)
 
 -- the conversation ends: the script is finished, the box is gone, and the
--- player is standing exactly where it left them -- which is a window in its
--- own right, without waiting out the three seconds a cold stop needs
+-- player is standing exactly where it left them -- which IS a window, and the
+-- one a menu hands back to.  Closing is the moment, not opening.
 scripting = false
 held = false
 table.remove(screens)
@@ -271,16 +277,30 @@ run(1)
 check("the moment it ends is", writes == before + 1)
 held = true
 
--- a plain menu is a window straight away: nothing is half-done behind it
+-- a plain menu, with nothing half-done behind it, and the player standing
+-- still under it.  This is the case that used to write on the frame the menu
+-- opened, and it is the one being asked for back: they opened the bag to USE
+-- something, and the press they are about to make must not be eaten.
 run(25)
 before = writes
 emit("pokemon.caught")
 run(2)
 check("walking, still waiting", writes == before)
+held = false                          -- standing still, so only the menu is
 screens[#screens + 1] = { menu = true }
-run(1 / 30)
-check("the START menu is a window on the frame it opens", writes == before + 1)
+run(2)
+check("the START menu is not a window, however long it is up", writes == before)
+
+-- and it is the menu doing the refusing, not the stillness: three seconds of
+-- standing there would otherwise have been a window twice over
+run(4)
+check("not even past the stop this would otherwise have been", writes == before)
+
+-- close it, and the save goes on the route the player is standing on
 table.remove(screens)
+run(1)
+check("closing it hands the save back", writes == before + 1)
+held = true
 
 -- and the start of a battle, behind its own intro
 run(25)

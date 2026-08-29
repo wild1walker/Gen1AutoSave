@@ -1,7 +1,7 @@
 {
   "id": "gen1autosave",
   "name": "Gen1AutoSave",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "api": 2,
   "games": [
     "all"
