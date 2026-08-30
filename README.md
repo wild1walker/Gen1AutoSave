@@ -393,50 +393,56 @@ had *stopped*, so what it actually did was give up and write into a stride —
 the one frame this whole path exists to avoid, arriving reliably rather than by
 accident.
 
-#### The windows
+#### The window
 
-There are three, and they are named.
+There used to be three, picked by asking **where** the player was — in a warp,
+out of a battle, standing still. That was the wrong question, and it is why
+each of the three was reported as a stutter in turn. A long frame is not felt
+because of where it happens. It is felt because **something on screen was
+supposed to move and didn't.**
 
-| Window | Why |
+So the question is a narrow one now: *is the screen a solid colour this frame,
+and will it still be one on the next?* If it is, a pause changes nothing — the
+picture before and the picture after are the same picture — and the only cost
+is that the black lasts a little longer.
+
+A transition answers `alpha()` with the strength of its own veil, so `alpha()
+>= 1` asks that directly instead of guessing from a state's name. What it
+finds:
+
+| Window | How long it holds |
 | --- | --- |
-| A warp, FLY or TELEPORT | The screen is going black, and the write goes at the **start** of that fade rather than the end of it — see below. A route seam is **not** one of these — see above |
-| A battle **ending** | In the hold at the front of the return transition, where the screen is a solid colour and the fade back has not started stepping. A battle *starting* is **not** one — see below |
-| Standing still | A *real* stop, not a pause — and the moment a menu, a conversation or a battle hands control back counts as one |
+| A warp, a door, a cave mouth | The **last eight frames** of the fade out. `GBFadeOutToBlack` is a palette staircase, not a ramp: four steps of eight frames, and only the fourth is solid black. Then the map is simply there — a warp's fade-in is zero frames long |
+| `FLY`, `TELEPORT`, `DIG`, `ESCAPE ROPE` | The same eight frames, in white |
+| A battle **ending** | The ten frames of hold at the front of the return, before `GBFadeInFromWhite` starts stepping |
+| A script fade | However long a bracketing `GBFadeOutToBlack` holds at black |
+| Standing still | A *real* stop — `STILL_FOR` seconds with no direction held. The only window that is not a covered screen, and the only one left with `SAVE ON LOADS` off |
 
-#### Going into a battle is not a window either
+And, just as importantly, what it does **not** find.
 
-The intro wipe is as blacked-out a screen as the game has, and on this path's
-own reasoning it qualified. It shipped that way, and it was wrong.
+**A battle's intro wipe** has no `alpha()` at all, so the most frequent
+transition in the game — the one that opens onto a menu the player is already
+reaching for — is not a window and cannot become one by accident. It used to
+be: the wipe is as blacked-out a screen as the game has, and on the old
+reasoning it qualified. What that actually produced was the battle being slow
+to start, every single encounter. Nothing is lost by dropping it; the end of
+the same battle writes that same route with the outcome in it as well.
 
-It is the only covered screen in the game the player is watching for a *cue*
-rather than waiting out. The wipe closes and the very next thing that happens
-is a menu they are already reaching for — on the most frequent transition in
-the game. A hitch there is not a longer loading screen, it is the battle being
-slow to start, every single encounter.
+**Neither end of a door.** `map.entered` is the far end: the transition has
+already popped and the new map is up behind nothing at all, so a write there
+is the game arriving somewhere and stopping dead. The **first** frame is
+worse — at `alpha` 0 the map is still fully drawn, so what freezes is the
+world. Both were shipped, and both were reported. The eight frames between
+them are neither.
 
-Nothing is lost by dropping it. The state it wrote was the overworld the
-battle started from; the end of the same battle, seconds later, writes that
-same route with the outcome in it as well, behind a screen nobody is waiting
-on.
+**And a door does not leave a save owing after it has taken one.** The far end
+is still a checkpoint, but it only asks for the save when this door's own
+black could not take it. Asking unconditionally set `due` straight back the
+moment the write cleared it — so the game arrived on the new map already owing
+a save it did not owe, and the route path took *that* one a few seconds later,
+in the middle of the walk away.
 
-#### And the end of one goes a frame later than it used to
-
-`battle.ended` fires in a gap. `BattleState:finish` pops the battle screen,
-emits, and only *then* pushes the return transition — so on that one frame
-nothing is covering anything. A write taken there is a freeze between the last
-battle frame and the first frame of the fade, and what you see is the fade
-appearing late, or appearing already part-way down.
-
-The transition that follows opens with a **hold**: ten frames at full opacity
-before `GBFadeInFromWhite` starts stepping the palette. That is the frame to
-spend. The hitch lands on a screen that is not moving and cannot move, and
-every step of the fade plays *after* it — the same trade the warp fade makes.
-
-So `battle.ended` only arms the write, and the next fully-covered frame takes
-it. A transition this does not recognise means no window, not no save: the
-save is still due and the next screen it does know takes it instead.
-
-#### A menu is not a window
+#### A menu is not a window — and neither is the moment one closes
 
 There used to be a fourth, and it was the widest of them: **anything over the
 overworld**. A text box while somebody talks, the START menu, the bag, the
@@ -453,10 +459,25 @@ mid-stride is ugly; a swallowed A press is the game not listening.
 "Is the screen moving" was the wrong question. The right one is whether you are
 in the middle of doing something, and in a menu you always are.
 
-So a screen over the overworld is a **refusal** now, not a window. The moment
-one *closes* is still a window — that is the settle grace, and by then the menu
-is gone and you are standing on the route with nothing pressed. Closing is the
-moment, not opening.
+So a screen over the overworld is a **refusal**, not a window.
+
+The moment one *closes* used to be one — the settle grace: the box is gone,
+you are standing exactly where the game left you and have not moved yet, so
+take it now. What that describes is the frame you have been **waiting for**.
+You closed the box because you wanted to go, and the write lands a beat after
+you are handed control — so the hitch is not in the pause, it is in your first
+stride out of it. Reported exactly that way.
+
+With `SAVE ON LOADS` on there is no reason to take it: a screen you cannot see
+is coming — the next door, the next battle — and the save waits for one, with
+nothing lost but a few minutes of nothing happening. So the settle grace is the
+route path's, and the route path is what that row switches off. With the row
+**off** it is still there, because then the route is the only place a save can
+ever go and a settled frame is the best of them.
+
+A real stop stays a window either way. Standing still for `STILL_FOR` seconds
+with no direction held is not a pause between two things you are doing; it is
+you not doing anything.
 
 A write that genuinely wants to go under a screen still can: a warp's black
 screen and a battle's return hold are not screens you can press through, and

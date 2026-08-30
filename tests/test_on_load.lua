@@ -132,6 +132,42 @@ local function endBattle()
   table.remove(screens)
 end
 
+-- The warp fade, as much of it as this path reads.  GBFadeOutToBlack is a
+-- palette STAIRCASE, not a ramp: four steps of eight frames, and only the
+-- fourth is solid black (src/render/Transition.lua fadeAlpha,
+-- home/fade.asm:43-46).  So a 32-frame door is 24 frames of a picture the
+-- player can still see and EIGHT frames of black -- and which of those the
+-- save lands on is the whole of what this file is about.
+local WARP_FADE, FADE_STEP = 32, 8
+local function pushFade()
+  local fade = { t = 0 }
+  function fade:alpha()
+    local steps = math.floor(WARP_FADE / FADE_STEP)
+    local step = math.min(steps - 1, math.floor(self.t / (WARP_FADE / steps)))
+    return step / (steps - 1)
+  end
+  screens[#screens + 1] = fade
+  return fade
+end
+
+-- A door, end to end: the fade out, then the map change at the bottom of it,
+-- then the transition popping itself and the map simply being there (a warp's
+-- fade-in is zero frames long -- Timing.WARP_FADE_IN).
+local function warp(via, opts)
+  local flag = (opts and opts.teleport) and "teleportOut" or "transitioning"
+  ow[flag] = true
+  local fade = pushFade()
+  for _ = 1, (opts and opts.frames or WARP_FADE) do
+    run(1 / 60)
+    fade.t = fade.t + 1
+  end
+  table.remove(screens)
+  ow[flag] = false
+  emit("map.entered", via and { via = via } or nil)
+  run(1 / 60)
+  return fade
+end
+
 -- one frame, so the mod has a game handle before any event fires
 run(1 / 60)
 
@@ -142,8 +178,8 @@ emit("pokemon.caught")            -- dirty + due, and no black screen with it
 run(5)
 check("a due save does not go on the route straight away", writes == before)
 
-emit("map.entered")               -- the warp's own screen, still covered
-check("entering a map writes it there", writes == before + 1)
+warp()                            -- a whole door: fade, map change, map up
+check("a door takes it", writes == before + 1)
 
 -- ---------- 2. and so does the end of a battle
 
@@ -226,29 +262,29 @@ run(25)
 before = writes
 emit("pokemon.caught")
 syncState.busy = true             -- a transfer in flight
-emit("map.entered")
-check("a warp does not write under a live sync transfer", writes == before)
+warp()
+check("a door does not write under a live sync transfer", writes == before)
 syncState.busy = false
 -- syncSettled arms a SYNC_RETRY re-check when it finds a transfer, so the
 -- settle is not visible on the very next frame: it waits out the retry first
-emit("map.entered")
-check("nor on the frame the transfer clears", writes == before)
+warp()
+check("nor on the door the transfer clears on", writes == before)
 run(3)
-emit("map.entered")
-check("and writes on the next warp once the retry has passed",
+warp()
+check("and writes on the next door once the retry has passed",
       writes == before + 1)
 
 run(25)
 before = writes
 emit("pokemon.caught")
 player.moving = true
-emit("map.entered")
+warp()
 check("nor while the player is still moving", writes == before)
 
--- and the moment it stops, the next warp takes it
+-- and the moment it stops, the next door takes it
 player.moving = false
-emit("map.entered")
-check("the warp after that one does", writes == before + 1)
+warp()
+check("the door after that one does", writes == before + 1)
 
 -- ---------- 5. MIN_GAP is not bypassed by a loading screen
 --
@@ -426,7 +462,7 @@ check("nor does a mod rebuilding the map underfoot", writes == before)
 emit("map.entered", { via = "boot" })
 check("nor the game starting up", writes == before)
 
-emit("map.entered", { via = "warp" })
+warp("warp")
 check("a door does", writes == before + 1)
 
 -- and a seam does not make a save due in the first place: nothing else here
@@ -442,11 +478,48 @@ run(5)
 check("...not even once the player stands still", writes == before)
 held = true
 
+-- ---------- a door does not leave a save owing after it has taken one
+--
+-- The far end of a door is a checkpoint, and it used to ask for the save
+-- there whatever had already happened.  With the write now landing in the
+-- black eight frames earlier, that request set `due` straight back the
+-- moment it was cleared -- so the game arrived on the new map already owing
+-- a save it did not owe, and the route path took THAT one a few seconds
+-- later, in the middle of the walk away.  The hiccup after a door, produced
+-- by the mechanism meant to prevent it.
+run(25)
+before = writes
+emit("pokemon.caught")
+warp("warp")
+check("the door writes", writes == before + 1)
+before = writes
+held = false
+-- past MIN_GAP as well, so what is being checked is that nothing is OWED
+-- rather than that the floor happened to refuse it
+run(25)
+check("and leaves nothing owing behind it", writes == before)
+held = true
+
+-- a door whose black could NOT take it still leaves the save due, because
+-- then the far end is the only thing that knows a checkpoint happened
+run(25)
+before = writes
+emit("pokemon.caught")
+player.moving = true                 -- mid-stride: the black refuses
+warp("warp")
+check("a door that could not write does not write", writes == before)
+player.moving = false
+held = false
+run(25)
+check("...but the save is still owed, and the stop takes it",
+      writes == before + 1)
+held = true
+
 -- FLY has a screen of its own
 run(25)
 before = writes
 emit("pokemon.caught")
-emit("map.entered", { via = "fly" })
+warp("fly")
 check("FLY writes, it has an animation of its own", writes == before + 1)
 
 -- an engine too old to say anything keeps the old answer, so a build that
@@ -454,17 +527,23 @@ check("FLY writes, it has an animation of its own", writes == before + 1)
 run(25)
 before = writes
 emit("pokemon.caught")
-emit("map.entered")
+warp()
 check("a map.entered with no via at all still writes", writes == before + 1)
 
--- ---------- 12. the write goes at the START of the fade, not the end
+-- ---------- 12. the write goes in the BLACK, not at either end
 --
--- map.entered is the END of a warp's animation: the fade to black has already
--- played by the time it fires, and the fade back is zero steps long.  A write
--- there had nothing left in front of it to hide under, so what the player saw
--- was the door popping them through.  The first frames of the transition are
--- the other side of the same black screen, and thirty-two steps of fade come
--- after them.
+-- Both ends of a door were tried and both were reported.
+--
+-- map.entered is the far end: the transition has already popped and the new
+-- map is up behind nothing at all, so the write is the game arriving
+-- somewhere and stopping dead -- "right when I load in somewhere".  The
+-- FIRST frame is worse: the fade has not started stepping and the map is
+-- still fully drawn at alpha 0, so what freezes is the world -- "the going
+-- into building save noticeably freezes the fade animation".
+--
+-- Between them are eight frames where the screen is solid black and stays
+-- solid black.  A pause there changes nothing on screen; the black is
+-- simply longer.
 --
 -- The transition is a screen over the overworld, exactly as it is in the
 -- engine, so this also covers the ordering in writeWindow: an ordinary due
@@ -480,36 +559,47 @@ check("walking, a due save is waiting", writes == before)
 -- the door: the screen starts going black, and the transition goes on the
 -- stack the way the engine puts it there
 ow.transitioning = true
-screens[#screens + 1] = { transition = true }
+local fade = pushFade()
 run(1 / 60)
-check("the save goes on the first frame of the fade", writes == before + 1)
+check("the first frame of the fade is not the window: the map is still up",
+      writes == before)
+
+-- twenty-three more frames of a picture the player can still see through
+for _ = 1, 23 do
+  fade.t = fade.t + 1
+  run(1 / 60)
+end
+check("nor is any frame the fade is still stepping through", writes == before)
+check("the fade has not reached black yet", fade:alpha() < 1)
+
+-- and then it does
+fade.t = fade.t + 1
+run(1 / 60)
+check("the twenty-fifth frame is solid black", fade:alpha() >= 1)
+check("which is the window, and takes it", writes == before + 1)
 
 -- ...and map.entered, which is the far end of that same fade, must not write
 -- a second time for one door
 before = writes
-run(0.4)                             -- the rest of a 32-step fade
+for _ = 1, 7 do fade.t = fade.t + 1; run(1 / 60) end
 ow.transitioning = false
 table.remove(screens)
 emit("map.entered")
+run(1 / 60)
 check("the far end of the same fade does not write again", writes == before)
 
 -- A fade the player is mid-stride through is not writable -- that guard is
--- the whole point of the path -- and then map.entered is the fallback that
--- catches the warp.
+-- the whole point of the path -- and the save stays due for the next door.
 run(25)
 before = writes
 emit("pokemon.caught")
 player.moving = true
-ow.transitioning = true
-screens[#screens + 1] = { transition = true }
-run(0.4)
+warp()
 check("a fade the player is still mid-stride through writes nothing",
       writes == before)
 player.moving = false
-ow.transitioning = false
-table.remove(screens)
-emit("map.entered")
-check("and map.entered catches that warp instead", writes == before + 1)
+warp()
+check("and the next door catches that save instead", writes == before + 1)
 
 -- TELEPORT blacks out through teleportOut rather than transitioning, and it
 -- is the same window.
@@ -517,12 +607,8 @@ run(25)
 before = writes
 emit("pokemon.caught")
 run(2)
-ow.teleportOut = true
-screens[#screens + 1] = { transition = true }
-run(1 / 60)
+warp(nil, { teleport = true })
 check("TELEPORT's own fade is a window too", writes == before + 1)
-ow.teleportOut = false
-table.remove(screens)
 
 -- With SAVE ON LOADS off, the fade is not a window and the save waits for the
 -- player to stop, the same as every other screen.
