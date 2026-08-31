@@ -12,6 +12,9 @@ local restoreResult = { true }
 local said = {}
 
 local mod = {
+  -- see the note in test_autosave.lua: the Loader hands every mod one of
+  -- these, and this mod publishes through it
+  exports = {},
   options = { define = function(_, s) return s end, get = function(_, k) return opts[k] end },
   events = { on = function(_, n, fn) handlers[n] = handlers[n] or {}; table.insert(handlers[n], fn) end },
   hooks = { wrap = function(_, n, fn) chains[n] = fn end },

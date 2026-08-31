@@ -255,6 +255,36 @@ return function(mod)
     return top ~= nil and top ~= ow
   end
 
+  -- ------- a veil that is STEPPING is an animation, wherever it lives
+  --
+  -- quietFrame below already knows this about the overworld's own fades:
+  -- "A FADE IS AN ANIMATION", and `ow.transitioning or ow.teleportOut` is
+  -- that said in the vocabulary the overworld has.  But the overworld is not
+  -- where most fades live.  The end of a battle is a STACK STATE with a veil
+  -- of its own -- the engine's white `Transition.battleReturn`, and Gen1WildUI's
+  -- BLACK OUTRO on top of it -- and the overworld's flags are false the whole
+  -- way through both.  So `screenOver` called those frames quiet, the sync
+  -- hold came off, and the plan the write had just woken landed in the middle
+  -- of the fade out of a battle.  Every battle, and it is the one fade the
+  -- player watches all the way through.
+  --
+  -- A state says so itself: `alpha()` is the strength of its own veil.  Full
+  -- means the picture cannot change and a long frame costs nothing; anything
+  -- BETWEEN means the veil is on its way somewhere and every frame of it is a
+  -- frame that was supposed to move.  So a partial veil is exactly as busy as
+  -- a walk, and is answered the same way.
+  --
+  -- Not "a transition is up".  At alpha 1 a transition is the best frame in
+  -- the game to spend, which is what fullyVeiled is for; refusing those would
+  -- give back the door freeze this mod spent three versions removing.
+  local function veilStepping(game)
+    local top = game and game.stack and game.stack.top and game.stack:top()
+    if type(top) ~= "table" or type(top.alpha) ~= "function" then return false end
+    local ok, a = pcall(top.alpha, top)
+    if not ok or type(a) ~= "number" then return false end
+    return a > 0 and a < 1
+  end
+
   local function scriptRunning(ow)
     if not ow then return false end
     if ow.runner and ow.runner.isRunning and ow.runner:isRunning() then
@@ -295,6 +325,10 @@ return function(mod)
     -- Ahead of screenOver, because the transition IS a screen over the
     -- overworld and would have been called quiet by the line below.
     if ow.transitioning or ow.teleportOut then return false end
+    -- And the same for a fade that is a state rather than a flag: the end of
+    -- a battle is the one every player watches, and screenOver called it the
+    -- quietest frame in the game.  See veilStepping.
+    if veilStepping(game) then return false end
     if screenOver(game) then return true end
     if ow.player.moving then return false end
     if walking(game, ow) then return false end
@@ -355,9 +389,34 @@ return function(mod)
   -- the route is the only place a save can ever go and a settled frame is the
   -- best of them.
   --
-  -- A real stop stays a window either way.  Standing still for STILL_FOR
-  -- seconds with no direction held is not a pause between two things the
-  -- player is doing; it is the player not doing anything.
+  -- BOTH OF THEM BELONG TO THE BUILD WITH NOWHERE ELSE TO WRITE.
+  --
+  -- That is what the paragraph above was reaching for and did not finish.
+  -- `quietFrame` finished it -- it takes the grace window only when SAVE ON
+  -- LOADS is off -- and this function did not, so on the DEFAULT build, where
+  -- a covered screen is always coming, a save still landed the moment a menu
+  -- closed.  Reported as exactly that: "closing menus / standing still
+  -- shouldn't trigger an auto save".
+  --
+  -- They are right, and the reason is already written above: with SAVE ON
+  -- LOADS on there is nothing to buy.  The next door, the next warp, the ride
+  -- back out of the next battle -- `writeUnderCover` takes one of those and
+  -- the player sees none of it.  A route window only costs a hitch somewhere
+  -- they are looking.
+  --
+  -- So on the default build the route has NO window: not a settled frame, not
+  -- a real stop.  With SAVE ON LOADS off the route is the only place a save
+  -- can ever go, and there both come back -- a real stop first, because
+  -- standing still with no direction held is the player not doing anything.
+  --
+  -- Nothing is written less often than it was, only somewhere else:
+  -- `loadScreenWrite` asks for the same three things this path does -- due,
+  -- dirty, and MIN_GAP since the last one -- so a save that was going to
+  -- happen still happens, at the next covered screen instead of on the route.
+  -- The honest cost is that a player who walks a long way without a door, a
+  -- warp or a battle waits longer for one; the events that mark the file
+  -- dirty are mostly the ones that lead to a fade soon after, so in practice
+  -- that wait is short.
   local function writeWindow(game)
     local ow = game and game.overworld
     if not (ow and ow.player) then return false end
@@ -379,6 +438,8 @@ return function(mod)
     if screenOver(game) then return false end
     if ow.player.moving then return false end
     if walking(game, ow) then return false end
+    -- the same line quietFrame draws, in the same place, for the same reason
+    if mod.options:get("on_load") ~= false then return false end
     if state.stillFor >= STILL_FOR then return true end
     return state.settledAt ~= nil
       and state.clock - state.settledAt <= SETTLE_GRACE
@@ -1167,11 +1228,43 @@ return function(mod)
   -- This is one function because it is one idea.  It replaced three -- a
   -- write at the START of a warp fade, a write on map.entered, and an armed
   -- write after a battle -- and each of those was a guess at the same thing.
+  -- ------- and it has to STAY full
+  --
+  -- `alpha() >= 1` asks whether the screen is a solid colour THIS frame.  The
+  -- comment above asks for more than that -- "and will it still be one on the
+  -- next?" -- and for the engine's own fades the two are the same question,
+  -- because those are palette staircases: a step is eight frames long, so a
+  -- full veil is eight frames of full veil.
+  --
+  -- A mod's fade need not be a staircase, and the one on this cart is not.
+  -- Gen1WildUI's BLACK OUTRO is a linear ramp over 36 frames, and it touches
+  -- alpha 1 on EXACTLY ONE frame: the cut, where the fade pops itself off the
+  -- stack, runs the engine's own finish, and pushes itself back for the fade
+  -- in.  That is already the most expensive frame of the whole outro, it is
+  -- the only frame that answered this question yes, and so it is the frame
+  -- every post-battle write landed on -- and the frame after it the ramp is
+  -- moving again.
+  --
+  -- Asking for the veil to have been full on the frame BEFORE as well is the
+  -- rest of the original question, and it costs nothing on a staircase: the
+  -- write moves from the first frame of a hold to the second.  On a ramp it
+  -- correctly finds no window at all, which is the right answer -- a ramp has
+  -- no covered moment to give.
+  local VEIL_SETTLE = 2
+
   local function fullyVeiled(game)
     local top = game and game.stack and game.stack.top and game.stack:top()
-    if type(top) ~= "table" or type(top.alpha) ~= "function" then return false end
-    local ok, a = pcall(top.alpha, top)
-    return ok and type(a) == "number" and a >= 1
+    local full = false
+    if type(top) == "table" and type(top.alpha) == "function" then
+      local ok, a = pcall(top.alpha, top)
+      full = ok and type(a) == "number" and a >= 1
+    end
+    if not full then
+      state.veiled = 0
+      return false
+    end
+    state.veiled = (state.veiled or 0) + 1
+    return state.veiled >= VEIL_SETTLE
   end
 
   -- The checkpoint half is separate from the window half, and stays where it
@@ -1194,14 +1287,51 @@ return function(mod)
     state.fading = fading
     -- Never inside a battle.  Nothing in a battle answers alpha() today, so
     -- this costs one table read and buys the guarantee outright rather than
-    -- depending on that staying true.
-    if state.inBattle then return end
+    -- depending on that staying true.  The veil counter is dropped with it,
+    -- so a count left over from before the battle cannot be spent after it.
+    if state.inBattle then
+      state.veiled = 0
+      return
+    end
     if not fullyVeiled(game) then return end
     if loadScreenWrite(game, "a screen nobody can see") then
       state.fadeWrote = true
     end
   end
 
+
+  -- Exposed for the headless suite.  Both are pure questions about one
+  -- frame -- "is this veil moving?", "has it been still long enough to spend
+  -- a frame under?" -- and both were wrong in ways nothing else in this file
+  -- could have caught, so they are the two worth being able to drive from a
+  -- test with a stack made of three tables.
+  mod.exports.veilStepping = veilStepping
+  mod.exports.fullyVeiled = fullyVeiled
+  mod.exports.veilState = state
+  -- And the third: may a save be written on the route this frame?  Exposed
+  -- for the same reason as the other two -- it is a pure question about one
+  -- frame, and the answer changed with SAVE ON LOADS in a way nothing else in
+  -- the tree could have caught.
+  mod.exports.writeWindow = writeWindow
+
+  -- ...and two for the nightly channel's test bench, which is the other thing
+  -- that wants to drive this by hand.  A save cannot be watched for by
+  -- playing until one happens -- the whole design is that it happens where
+  -- nobody is looking -- so the bench asks for one and reads back whether it
+  -- has landed.  `request` is the same call every checkpoint makes, so a
+  -- bench-asked save takes the same windows and the same refusals as any
+  -- other; there is deliberately no "write it now".
+  mod.exports.autosaveRequest = function() request() end
+
+  mod.exports.autosaveStatus = function()
+    return {
+      due = state.due and true or false,
+      dirty = state.dirty and true or false,
+      veiled = state.veiled or 0,
+      inBattle = state.inBattle and true or false,
+      sinceWrite = state.clock - state.lastWriteAt,
+    }
+  end
 
   -- A manual save resets everything: the player just did the thing.  It is
   -- otherwise none of this mod's business -- writeSave notifies the sync

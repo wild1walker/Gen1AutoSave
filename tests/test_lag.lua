@@ -18,6 +18,10 @@ local opts = {
 local handlers, chains = {}, {}
 local boxes = {}
 local mod = {
+  -- The Loader hands every mod one of these (Loader.lua:1268).  This mod
+  -- publishes its veil predicates and its save window through it so a
+  -- headless case can drive them, so the stand-in needs it to be a table.
+  exports = {},
   options = {
     define = function(_, s) return s end,
     get = function(_, k) return opts[k] end,

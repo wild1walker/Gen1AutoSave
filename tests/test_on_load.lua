@@ -18,6 +18,10 @@ local opts = {
 local handlers, chains = {}, {}
 local boxes = {}
 local mod = {
+  -- The Loader hands every mod one of these (Loader.lua:1268).  This mod
+  -- publishes its veil predicates and its save window through it so a
+  -- headless case can drive them, so the stand-in needs it to be a table.
+  exports = {},
   options = {
     define = function(_, s) return s end,
     get = function(_, k) return opts[k] end,
@@ -128,7 +132,12 @@ end
 local function endBattle()
   emit("battle.ended")
   pushReturn()
-  run(1 / 60)
+  -- Three frames, not one.  The write used to come off the ROUTE, which
+  -- answered on the first frame; on the default build the route has no window
+  -- and the save goes through the covered screen instead, which wants the veil
+  -- solid for VEIL_SETTLE frames before it will spend one.  Same save, a few
+  -- frames later, and nobody is looking at any of them.
+  run(3 / 60)
   table.remove(screens)
 end
 
@@ -192,6 +201,8 @@ emit("battle.ended")
 check("the event alone is not the window: nothing is covering yet", writes == before)
 local ret = pushReturn()
 run(1 / 60)
+check("one frame of hold is not yet a settled screen", writes == before)
+run(2 / 60)
 check("the return transition's hold is, and it writes there", writes == before + 1)
 table.remove(screens)
 
@@ -207,8 +218,8 @@ ret.t = RETURN_HOLD + 4          -- the fade is already part-way down
 run(1 / 60)
 check("a fade already stepping is not the window", writes == before)
 ret.t = 0                        -- a fresh hold, solid again
-run(1 / 60)
-check("the next solid frame takes it", writes == before + 1)
+run(3 / 60)
+check("the next solid frames take it", writes == before + 1)
 table.remove(screens)
 
 -- ---------- 3. waiting is not on a clock
@@ -239,7 +250,9 @@ held = false
 run(1)
 check("a second of not walking is not standing still", writes == before)
 run(3)
-check("a few seconds of it is, and it writes there", writes == before + 1)
+check("...and on the default build it is STILL not a window: with SAVE ON "
+      .. "LOADS on there is a covered screen coming and nothing to buy",
+      writes == before)
 held = true
 
 -- And the frame between two strides is not standing still.  `moving` is false
@@ -253,7 +266,7 @@ run(5)
 check("the gap between two strides is not an opening", writes == before)
 held = false
 run(4)
-check("but a real stop is", writes == before + 1)
+check("nor is a real stop, for the same reason", writes == before)
 held = true
 
 -- ---------- 4. the gates still apply on a loading screen
@@ -359,7 +372,8 @@ scripting = false
 held = false
 table.remove(screens)
 run(1)
-check("the moment it ends is", writes == before + 1)
+check("and the moment it ends is not one either, on this build",
+      writes == before)
 held = true
 
 -- a plain menu, with nothing half-done behind it, and the player standing
@@ -381,10 +395,15 @@ check("the START menu is not a window, however long it is up", writes == before)
 run(4)
 check("not even past the stop this would otherwise have been", writes == before)
 
--- close it, and the save goes on the route the player is standing on
+-- ...and closing it does NOT hand the save back on the default build.  This
+-- is the reported one: "closing menus / standing still shouldn't trigger an
+-- auto save".  The save is still owed; the next door, warp or ride out of a
+-- battle takes it where nobody is looking.
 table.remove(screens)
 run(1)
-check("closing it hands the save back", writes == before + 1)
+check("closing it does not hand the save back", writes == before)
+warp()
+check("the next door takes it instead", writes == before + 1)
 held = true
 
 -- and the start of a battle is NOT a window, however covered its intro is.
@@ -511,7 +530,9 @@ check("a door that could not write does not write", writes == before)
 player.moving = false
 held = false
 run(25)
-check("...but the save is still owed, and the stop takes it",
+check("...and the stop does not take it on this build", writes == before)
+warp()
+check("but the save is still owed, and the next door takes it",
       writes == before + 1)
 held = true
 
@@ -576,6 +597,7 @@ check("the fade has not reached black yet", fade:alpha() < 1)
 fade.t = fade.t + 1
 run(1 / 60)
 check("the twenty-fifth frame is solid black", fade:alpha() >= 1)
+run(2 / 60)
 check("which is the window, and takes it", writes == before + 1)
 
 -- ...and map.entered, which is the far end of that same fade, must not write
