@@ -139,6 +139,14 @@ local function endBattle()
   -- frames later, and nobody is looking at any of them.
   run(3 / 60)
   table.remove(screens)
+  -- And then the wait for the battle's OUTCOME to be recorded.  The save used
+  -- to go in the return hold above, which is before the engine has marked the
+  -- trainer defeated -- so loading that save put the player back in front of
+  -- someone who challenged them again.  The mod now holds the write until the
+  -- post-battle sequence has gone quiet, and takes it there instead.  A battle
+  -- on the way out is not over when the screen clears; it is over when nothing
+  -- is running any more.
+  run(1)
 end
 
 -- The warp fade, as much of it as this path reads.  GBFadeOutToBlack is a
@@ -203,8 +211,11 @@ local ret = pushReturn()
 run(1 / 60)
 check("one frame of hold is not yet a settled screen", writes == before)
 run(2 / 60)
-check("the return transition's hold is, and it writes there", writes == before + 1)
+check("the hold alone no longer writes: the outcome is not recorded yet",
+      writes == before)
 table.remove(screens)
+run(1)
+check("it writes once the battle has gone quiet behind it", writes == before + 1)
 
 -- and it goes in the HOLD, not once the fade has started stepping: the whole
 -- point is that every frame of the fade plays after the hitch
@@ -219,8 +230,10 @@ run(1 / 60)
 check("a fade already stepping is not the window", writes == before)
 ret.t = 0                        -- a fresh hold, solid again
 run(3 / 60)
-check("the next solid frames take it", writes == before + 1)
+check("a solid veil is still not enough on its own", writes == before)
 table.remove(screens)
+run(1)
+check("the quiet after it is what takes it", writes == before + 1)
 
 -- ---------- 3. waiting is not on a clock
 --
