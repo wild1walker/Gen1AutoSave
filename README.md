@@ -148,6 +148,21 @@ alone for you to answer. So is a heal that does not stick: after three goes on
 one save the mod stops and puts the badge up. `HEAL CONFLICTS` turns the whole
 thing off if you would rather see every one of them.
 
+## On Gold, Silver and Crystal
+
+It works there too. Everything the mod promises is the same; what changes is
+how it answers one question — *is it safe to write right now?* — because the
+two games say "busy" in completely different ways.
+
+On Red a fade is `transitioning` or `teleportOut`. Gold has neither: a warp, a
+door, a teleport, the ride back out of a battle and a scripted fade to white
+are all `mapSetup` or `fade`. Scripts, engagement and emotes differ the same
+way. So the three guards — a fade running, something else holding the
+controls, the player mid-engagement — are each written once with a branch per
+cart, rather than the Red checks being sprinkled through the file the way they
+grew. Nothing about *when* it saves changed on Red; the same conditions are
+asked in the same places, from one definition instead of six.
+
 ## Working with save sync
 
 `Game:writeSave()` already notifies the sync engine after every successful
