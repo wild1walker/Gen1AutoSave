@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.20.2
+
+- **Every harness runs under the Lua the game runs, as well as the one CI
+  had.** 1.20.1 fixed a crash that a suite already covered; what let it ship
+  was that the suite ran only under Lua 5.4, and LOVE is LuaJIT. Both are
+  installed now and every suite runs under each. Two things surfaced
+  immediately: `tests/test_backups.lua` named `table.unpack` in its own
+  rollback stand-in, so five of its checks failed on LuaJIT, and
+  `tests/quit_fallback_test.lua` assumed which of the two names its
+  interpreter had. Both ask for whichever one is there.
+
 ## 1.20.1
 
 - **Picking QUIT no longer crashes when there is nothing to save.** Load a

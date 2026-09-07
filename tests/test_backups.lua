@@ -1,5 +1,11 @@
 -- Backup-ring and rollback harness: in-memory storage, a fake checkpoint
 -- service and a fake screen stack.
+-- The engine runs LuaJIT (5.1), where the global `unpack` is the one that
+-- exists; CI runs 5.4, where `table.unpack` is.  This harness is run under
+-- both, so it must not name just one -- `table.unpack` alone made every
+-- rollback check here fail under the interpreter the game actually uses.
+local unpackAny = unpack or table.unpack
+
 local writes, captures = 0, 0
 -- SAVE ON LOADS off: the ring is about what a write leaves behind, not about
 -- which screen the write happened on, so this drives the route path directly.
@@ -32,7 +38,7 @@ local mod = {
   },
   checkpoints = {
     capture = function() captures = captures + 1 return { kind = "overworld", id = captures } end,
-    restore = function() return table.unpack(restoreResult) end,
+    restore = function() return unpackAny(restoreResult) end,
   },
   ui = {
     insertBefore = function(items, anchor, item)

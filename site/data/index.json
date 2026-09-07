@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-07T06:07:49Z",
+  "generated_at": "2026-09-07T06:11:34Z",
   "count": 1,
   "categories": [
     "GAMEPLAY",
@@ -22,7 +22,7 @@
       "id": "gen1autosave",
       "title": "Gen1AutoSave",
       "author": "Wild",
-      "version": "1.20.1",
+      "version": "1.20.2",
       "summary": "Autosaves after battles, catches and new areas, offers the save when you QUIT, and keeps optional rollback backups.",
       "categories": [
         "QOL",

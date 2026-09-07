@@ -104,7 +104,10 @@ local function underLua(globalUnpack, tableUnpack, row, body)
   if not ran then error(err, 0) end
 end
 
-local REAL_UNPACK = table.unpack
+-- Whichever of the two names this interpreter actually has: the suite is
+-- run under 5.4 by CI and under LuaJIT by the bundle's, and it must not
+-- assume it is the one being simulated.
+local REAL_UNPACK = table.unpack or unpack
 
 -- LOVE: LuaJIT is 5.1, so the global `unpack` is the one that exists and
 -- table.unpack is nil.  The sandbox copies the host's `table` faithfully
