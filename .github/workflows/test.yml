@@ -21,15 +21,29 @@ jobs:
       - name: Mod index feed is current
         run: python3 tools/build_index.py --check
 
+      # Globbed, not listed.  The list this replaces named six files and the
+      # directory held nine: three suites were added after it was written and
+      # CI ran none of them.  The two globs are two calling conventions --
+      # tests/test_*.lua reach the mod as ../main.lua and want tests/ as the
+      # working directory, tests/*_test.lua reach it as main.lua and want the
+      # repository root -- so each runs where it can find the file.
+      #
+      # A suite fails loudly three ways and all three are checked: a non-zero
+      # exit, a FAIL line (indented in the newer suites, so the pattern allows
+      # leading space), and a non-zero count in a summary line.
       - name: Run harnesses
         run: |
-          set -euo pipefail
-          cd tests
+          set -uo pipefail
           fail=0
-          for t in test_autosave.lua test_backups.lua test_held.lua test_indicator.lua test_lag.lua test_on_load.lua; do
-            echo "== $t"
-            out="$(lua5.4 "$t")"
+          harness() {
+            echo "== $2"
+            local out status
+            out="$(cd "$1" && lua5.4 "$2" 2>&1)"; status=$?
             echo "$out"
-            if grep -q '^FAIL' <<<"$out"; then fail=1; fi
-          done
+            if [ "$status" -ne 0 ]; then fail=1; fi
+            if grep -qE '^[[:space:]]*FAIL' <<<"$out"; then fail=1; fi
+            if grep -qE '[1-9][0-9]* failed' <<<"$out"; then fail=1; fi
+          }
+          for t in tests/test_*.lua; do harness tests "$(basename "$t")"; done
+          for t in tests/*_test.lua; do harness . "$t"; done
           exit "$fail"
